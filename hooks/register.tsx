@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { Context, Limit } from '../types'
-import { contextDetailsOf, detailsOf, fitting, isReading, labelOf, severityOf, thresholdOf, viewOf } from './format'
+import { briefDetailsOf, contextDetailsOf, detailsOf, fitting, isReading, labelOf, severityOf, thresholdOf, viewOf } from './format'
 import type { LimitView, Segment, Severity, Tone } from './format'
 import { METER_HEIGHT, meterRuns, meterSvg } from './meter'
 import type { MeterRole } from './meter'
@@ -34,6 +34,7 @@ const PX_PER_CELL = 9
 
 type Elements = Pick<ElementTable<'terminal'>, 'Box' | 'Text'>
 type Meter = (view: LimitView, width: number, color: string, alt: string) => RenderElement
+type Details = (view: LimitView) => Segment[][]
 
 function layoutOf(columns: number, count: number) {
   const fit = Math.floor((columns - GAP * (count - 1)) / count)
@@ -100,18 +101,25 @@ function toneStyle(tone: Tone) {
 
 type DetailProps = { elements: Elements; segments: readonly Segment[] }
 
-// Measured to fit rather than left to wrap: a second line would knock this tile's
-// meter out of line with its neighbours'. The truncation is a backstop for wide fonts.
+// Measured to fit rather than left to wrap. A lone run is plain text, the likeliest to be
+// cut short with an ellipsis where a surface's text runs wider than measured.
 function Detail({ elements, segments }: DetailProps) {
   const { Box, Text } = elements
+  const [only] = segments
 
   return (
     <Box flexShrink={1} minWidth={0}>
-      <Text wrap="truncate-end">
-        {segments.map(segment => (
-          <Text {...toneStyle(segment.tone)}>{segment.text}</Text>
-        ))}
-      </Text>
+      {segments.length === 1 && only !== undefined ? (
+        <Text {...toneStyle(only.tone)} wrap="truncate-end">
+          {only.text}
+        </Text>
+      ) : (
+        <Text wrap="truncate-end">
+          {segments.map(segment => (
+            <Text {...toneStyle(segment.tone)}>{segment.text}</Text>
+          ))}
+        </Text>
+      )}
     </Box>
   )
 }
@@ -131,33 +139,27 @@ function Header({ elements, label, percent, candidates, width }: HeaderProps) {
   )
 }
 
-type TileProps = { elements: Elements; limit: Limit; view: LimitView; width: number; meter: Meter }
+type Column = { header: RenderElement; meter: RenderElement }
 
-function Tile({ elements, limit, view, width, meter }: TileProps) {
-  const { Box } = elements
-  const color = COLORS[severityOf(view.percent)]
+function limitColumn(elements: Elements, limit: Limit, view: LimitView, width: number, details: Details, meter: Meter): Column {
+  const label = labelOf(limit.kind)
 
-  return (
-    // The meter keeps to the tile's foot, level with its neighbours' whatever sits above.
-    <Box flexDirection="column" justifyContent="space-between" width={width}>
-      <Header elements={elements} label={labelOf(limit.kind)} percent={view.percent} candidates={detailsOf(view)} width={width} />
-      {meter(view, width, color, altOf(limit, view))}
-    </Box>
-  )
+  return {
+    header: <Header elements={elements} label={label} percent={view.percent} candidates={details(view)} width={width} />,
+    meter: meter(view, width, COLORS[severityOf(view.percent)], altOf(limit, view)),
+  }
 }
 
-type ContextTileProps = { elements: Elements; context: Context; width: number; meter: Meter }
-
-function ContextTile({ elements, context, width, meter }: ContextTileProps) {
-  const { Box } = elements
-  const color = COLORS[severityOf(context.percent)]
-
-  return (
-    <Box flexDirection="column" justifyContent="space-between" width={width}>
-      <Header elements={elements} label="Context" percent={context.percent} candidates={contextDetailsOf(context)} width={width} />
-      {meter({ percent: context.percent, hasReset: false }, width, color, `Context window, ${Math.round(context.percent)}% full`)}
-    </Box>
-  )
+function contextColumn(elements: Elements, context: Context, width: number, meter: Meter): Column {
+  return {
+    header: <Header elements={elements} label="Context" percent={context.percent} candidates={contextDetailsOf(context)} width={width} />,
+    meter: meter(
+      { percent: context.percent, hasReset: false },
+      width,
+      COLORS[severityOf(context.percent)],
+      `Context window, ${Math.round(context.percent)}% full`,
+    ),
+  }
 }
 
 type BandProps = {
@@ -167,10 +169,11 @@ type BandProps = {
   now: number
   readingAt: number
   columns: number
+  details: Details
   meter: Meter
 }
 
-function Band({ elements, limits, context, now, readingAt, columns, meter }: BandProps) {
+function Band({ elements, limits, context, now, readingAt, columns, details, meter }: BandProps) {
   const { Box, Text } = elements
 
   if (limits.length === 0 && !context) {
@@ -182,13 +185,42 @@ function Band({ elements, limits, context, now, readingAt, columns, meter }: Ban
   }
 
   const { direction, tile } = layoutOf(columns, limits.length + (context ? 1 : 0))
+  const all = [
+    ...limits.map(limit => limitColumn(elements, limit, viewOf(limit, now, readingAt), tile, details, meter)),
+    ...(context ? [contextColumn(elements, context, tile, meter)] : []),
+  ]
 
+  if (direction === 'column') {
+    return (
+      <Box flexDirection="column">
+        {all.map(column => (
+          <Box flexDirection="column" width={tile}>
+            {column.header}
+            {column.meter}
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+
+  // The figures in one row and the meters in the next, so every meter starts on the
+  // same line, whatever the text above it does.
   return (
-    <Box flexDirection={direction} alignItems="stretch" columnGap={GAP}>
-      {limits.map(limit => (
-        <Tile elements={elements} limit={limit} view={viewOf(limit, now, readingAt)} width={tile} meter={meter} />
-      ))}
-      {context && <ContextTile elements={elements} context={context} width={tile} meter={meter} />}
+    <Box flexDirection="column">
+      <Box columnGap={GAP}>
+        {all.map(column => (
+          <Box width={tile}>
+            {column.header}
+          </Box>
+        ))}
+      </Box>
+      <Box columnGap={GAP}>
+        {all.map(column => (
+          <Box width={tile}>
+            {column.meter}
+          </Box>
+        ))}
+      </Box>
     </Box>
   )
 }
@@ -311,7 +343,16 @@ export const register: Register = on => {
       )
 
       return (
-        <Band elements={{ Box, Text }} limits={limits} context={context} now={now} readingAt={readingAt} columns={columns} meter={meter} />
+        <Band
+          elements={{ Box, Text }}
+          limits={limits}
+          context={context}
+          now={now}
+          readingAt={readingAt}
+          columns={columns}
+          details={briefDetailsOf}
+          meter={meter}
+        />
       )
     }
 
@@ -326,7 +367,7 @@ export const register: Register = on => {
       )
 
       return (
-        <Band elements={{ Box, Text }} limits={limits} context={context} now={now} readingAt={readingAt} columns={columns} meter={meter} />
+        <Band elements={{ Box, Text }} limits={limits} context={context} now={now} readingAt={readingAt} columns={columns} details={detailsOf} meter={meter} />
       )
     }
 

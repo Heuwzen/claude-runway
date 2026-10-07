@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { compactTokens, contextDetailsOf, detailsOf, fitting, isReading, labelOf, paceOf, thresholdOf, timeUntil, viewOf } from './format'
+import { briefDetailsOf, compactTokens, contextDetailsOf, detailsOf, fitting, isReading, labelOf, paceOf, thresholdOf, timeUntil, viewOf } from './format'
 import type { Segment } from './format'
 import { meterRuns, meterSvg } from './meter'
 
@@ -86,7 +86,7 @@ test('a fresh reading shows its forecast; a stale one shows its age instead', as
 
 test('a window whose reset time has passed shows as reset', async () => {
   const limit = { kind: 'five_hour', percentUsed: 97, resetsAt: '2026-10-07T11:30:00Z' }
-  expect(viewOf(limit, NOW, NOW - 3 * 3_600_000)).toEqual({ percent: 0, hasReset: true, age: '3h' })
+  expect(viewOf(limit, NOW, NOW - 3 * 3_600_000)).toEqual({ percent: 0, hasReset: true, age: '3h', resetAgo: '30m' })
 })
 
 test('only well-formed saved readings are used', async () => {
@@ -120,9 +120,19 @@ test('a forecast keeps its warning longest, down to the bare time', async () => 
 test('a reached limit says when it comes back before anything else goes', async () => {
   const details = detailsOf({ percent: 100, resets: '42m', age: '5m', hasReset: false })
   expect(details.map(textOf)).toEqual(['Limit reached · as of 5m ago · resets in 42m', 'Limit reached · resets in 42m', 'resets in 42m'])
-  expect(detailsOf({ percent: 0, age: '3h', hasReset: true }).map(textOf)).toEqual(['reset since last reading', 'reset'])
+  expect(detailsOf({ percent: 0, age: '3h', hasReset: true, resetAgo: '2h' }).map(textOf)).toEqual(['reset 2h ago', 'reset'])
+  expect(detailsOf({ percent: 0, hasReset: true, resetAgo: '0m' }).map(textOf)).toEqual(['reset just now', 'reset'])
 })
 
 test('the context detail falls back to the token count alone', async () => {
   expect(contextDetailsOf({ percent: 74, tokens: 735_000, window: 1_000_000 }).map(textOf)).toEqual(['735k of 1M', '735k'])
+})
+
+test('the desktop gets one fact per figure: the forecast, the reset or when the limit comes back', async () => {
+  const stale = { percent: 47, elapsed: 0.8, resets: '1h 7m', age: '11m', hasReset: false }
+  expect(briefDetailsOf(stale).map(textOf)).toEqual(['resets in 1h 7m'])
+  const forecast = { percent: 85, elapsed: 0.6, forecastMs: 1016 * 60_000, resets: '3d', hasReset: false }
+  expect(briefDetailsOf(forecast).map(textOf)).toEqual(['→ limit in ~16h 56m', '→ ~16h 56m'])
+  expect(briefDetailsOf({ percent: 100, resets: '42m', age: '5m', hasReset: false }).map(textOf)).toEqual(['resets in 42m'])
+  expect(briefDetailsOf({ percent: 0, hasReset: true, resetAgo: '2h' }).map(textOf)).toEqual(['reset 2h ago', 'reset'])
 })

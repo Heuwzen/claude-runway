@@ -18,8 +18,8 @@ In the terminal:
 - **A forecast** when you are on course to run out before the reset, such as "→ limit in ~22m".
 - **Reset countdowns**, and a toast when a window crosses 80% and again at 95%.
 - **How full this chat's context window is**, as a third meter, once a reply has reported it.
-- **One line of text per meter, at any width.** In a narrow window each meter drops the reading's age first, then the reset time, so the meters stay level.
-- **Your limits as soon as a chat opens.** Each chat saves its latest reading, and a new chat shows the newest one, with its age ("as of 12m ago") where there is room, until its own first reply. Open chats also pick up newer readings from each other once a minute.
+- **Level meters at any width.** The meters always sit on one row, whatever the text above them does. In the desktop app each meter has one fact beside its number: when its window resets, or when you're on course to hit the limit. The terminal fits more where there's room, dropping the reading's age first, then the reset time, as the window narrows.
+- **Your limits as soon as a chat opens.** Each chat saves its latest reading, and a new chat shows the newest one until its own first reply. The terminal also shows the reading's age ("as of 12m ago") where there's room. Open chats also pick up newer readings from each other once a minute.
 
 It reads the rate-limit information Claude Code already receives with each reply. It makes no requests of its own, and nothing leaves your machine.
 

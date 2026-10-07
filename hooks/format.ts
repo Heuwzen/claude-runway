@@ -126,6 +126,8 @@ export type LimitView = {
   // How old the reading is, as text, once it is stale.
   age?: string
   hasReset: boolean
+  // How long ago the window reset, as text, once it has.
+  resetAgo?: string
 }
 
 // What one window looks like now, from a reading taken at `readingAt`.
@@ -134,7 +136,7 @@ export function viewOf(limit: Limit, now: number, readingAt: number): LimitView 
   const age = readingAt > 0 && now - readingAt >= STALE_AFTER ? formatDuration(now - readingAt) : undefined
 
   if (resetAt <= now) {
-    return { percent: 0, hasReset: true, age }
+    return { percent: 0, hasReset: true, age, resetAgo: formatDuration(now - resetAt) }
   }
 
   const pace = paceOf(limit, now)
@@ -172,7 +174,9 @@ function withNotes(lead: Segment[], notes: readonly string[]): Segment[] {
 // fits, so a narrow tile drops the reading's age, then the reset, never wrapping.
 export function detailsOf(view: LimitView): Segment[][] {
   if (view.hasReset) {
-    return [[dim('reset since last reading')], [dim('reset')]]
+    const ago = view.resetAgo === undefined || view.resetAgo === '0m' ? 'just now' : `${view.resetAgo} ago`
+
+    return [[dim(`reset ${ago}`)], [dim('reset')]]
   }
 
   const resets = view.resets === undefined ? [] : [`resets in ${view.resets}`]
@@ -195,6 +199,13 @@ export function detailsOf(view: LimitView): Segment[][] {
   }
 
   return [withNotes([], notes), withNotes([], resets)]
+}
+
+// The desktop counts its width in cells of its code font, and its text runs wider, so
+// there each figure gets a single fact beside it, short enough for any tile: the
+// forecast, the reset or the reached limit's return, never a second fact after a dot.
+export function briefDetailsOf(view: LimitView): Segment[][] {
+  return detailsOf(view).filter(segments => !segments.some(segment => segment.text.includes(' · ')))
 }
 
 // The line beside the context figure, fullest first.

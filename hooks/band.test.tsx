@@ -66,7 +66,10 @@ test('draws a meter for each window on the terminal and the desktop', async ($, 
     expect(await ui.find({ type: 'Text', text: '62%' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'resets in 1h' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Weekly' })).toBeDefined()
-    expect((await ui.find({ type: 'Text', text: /limit in/ }))?.text).toBe('→ limit in ~16h 56m · resets in 3d')
+    // The terminal measures exactly and fits two facts; the desktop gives each figure one.
+    expect((await ui.find({ type: 'Text', text: /limit in/ }))?.text).toBe(
+      surface === 'terminal' ? '→ limit in ~16h 56m · resets in 3d' : '→ limit in ~16h 56m',
+    )
 
     if (surface === 'desktop') {
       expect(await ui.findAll({ type: 'Svg' })).toHaveLength(2)
@@ -78,18 +81,20 @@ test('draws a meter for each window on the terminal and the desktop', async ($, 
   }
 })
 
-test('stacks the meters when the band is narrow', async ($, on) => {
+test('stacks the meters when the band is narrow, and lines them up in one row when wide', async ($, on) => {
   engine(on)
   await $.session.measure({ context: { window: 200_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
 
-  const ui = await $.ui.mount({
-    plugin: 'rate-limits',
-    surface: 'terminal',
-    ...BAND,
-    props: { ...BAND.props, bodyColumns: 40 },
-  })
-  expect((await ui.find({ type: 'Box' }))?.props).toMatchObject({ flexDirection: 'column' })
-  await ui.unmount()
+  const narrow = await $.ui.mount({ plugin: 'rate-limits', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns: 40 } })
+  const stacked = (await narrow.find({ type: 'Box' }))?.children as { props: Record<string, unknown> }[]
+  expect(stacked.map(tile => tile.props.flexDirection)).toEqual(['column', 'column'])
+  await narrow.unmount()
+
+  // Wide: the figures in one row and the meters in the next, so the meters always line up.
+  const wide = await $.ui.mount({ plugin: 'rate-limits', surface: 'desktop', ...BAND })
+  const rows = (await wide.find({ type: 'Box' }))?.children as { children: unknown[] }[]
+  expect(rows.map(row => row.children.length)).toEqual([2, 2])
+  await wide.unmount()
 })
 
 test('toasts once as a window crosses 80%, and again at 95%', async ($, on) => {
@@ -113,7 +118,7 @@ test('starts from the newest saved reading, before the first reply', async ($, o
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ plugin: 'rate-limits', surface, ...BAND })
     expect(await ui.find({ type: 'Text', text: '62%' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'as of 12m ago · resets in 1h' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? 'as of 12m ago · resets in 1h' : 'resets in 1h' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /limit in/ })).toBeUndefined()
     await ui.unmount()
   }
@@ -126,7 +131,7 @@ test('shows a window that reset since the saved reading as reset', async ($, on)
 
   const ui = await $.ui.mount({ plugin: 'rate-limits', surface: 'desktop', ...BAND })
   expect(await ui.find({ type: 'Text', text: '0%' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'reset since last reading' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'reset 30m ago' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -173,4 +178,21 @@ test('keeps every tile to one line beside three meters, shedding the age first',
     expect(await ui.find({ type: 'Text', text: '735k of 1M' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('gives each figure one fact on the desktop, whose text runs wider than its cells', async ($, on) => {
+  engine(on, { latest: { limits: LIMITS, at: NOW - 11 * 60_000 } })
+  await $.session.start(START)
+  const wide = { ...BAND, props: { ...BAND.props, bodyColumns: 150 } }
+
+  // The terminal's cells are its characters: the age fits beside the figure.
+  const terminal = await $.ui.mount({ plugin: 'rate-limits', surface: 'terminal', ...wide })
+  expect(await terminal.find({ type: 'Text', text: 'as of 11m ago · resets in 3d' })).toBeDefined()
+  await terminal.unmount()
+
+  // However many cells the desktop reports, its text is wider: one fact, no age.
+  const desktop = await $.ui.mount({ plugin: 'rate-limits', surface: 'desktop', ...wide })
+  expect(await desktop.find({ type: 'Text', text: 'resets in 3d' })).toBeDefined()
+  expect(await desktop.find({ type: 'Text', text: / · / })).toBeUndefined()
+  await desktop.unmount()
 })
