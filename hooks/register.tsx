@@ -230,19 +230,20 @@ function Band({ elements, limits, context, now, readingAt, columns, isBrief, met
   }
 
   // The figures in one row and the meters in the next, so every meter starts on the
-  // same line, whatever the text above it does.
+  // same line, whatever the text above it does. Each cell is a column, so a header
+  // stretches across its tile and its detail sits at the tile's right end.
   return (
     <Box flexDirection="column">
       <Box columnGap={GAP}>
         {all.map(column => (
-          <Box width={tile}>
+          <Box flexDirection="column" width={tile}>
             {column.header}
           </Box>
         ))}
       </Box>
       <Box columnGap={GAP}>
         {all.map(column => (
-          <Box width={tile}>
+          <Box flexDirection="column" width={tile}>
             {column.meter !== undefined && column.meter}
           </Box>
         ))}

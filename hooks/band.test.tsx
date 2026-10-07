@@ -98,8 +98,10 @@ test('stacks the meters when the band is narrow, and lines them up in one row wh
 
   // Wide: the figures in one row and the meters in the next, so the meters always line up.
   const wide = await $.ui.mount({ plugin: 'RateLimits', surface: 'desktop', ...BAND })
-  const rows = (await wide.find({ type: 'Box' }))?.children as { children: unknown[] }[]
+  const rows = (await wide.find({ type: 'Box' }))?.children as { children: { props: Record<string, unknown> }[] }[]
   expect(rows.map(row => row.children.length)).toEqual([2, 2])
+  // Each figure's cell is a column, so its header spans the tile and the detail sits at its right end.
+  expect(rows[0]?.children.map(cell => cell.props.flexDirection)).toEqual(['column', 'column'])
   await wide.unmount()
 })
 
