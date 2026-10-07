@@ -7,11 +7,11 @@ import type { LimitView, Segment, Severity, Tone } from './format'
 import { METER_HEIGHT, meterRuns, meterSvg } from './meter'
 import type { MeterRole } from './meter'
 
-const limitsAtom = atom({ plugin: 'rate-limits', key: 'limits' } as const, [])
-const contextAtom = atom({ plugin: 'rate-limits', key: 'context' } as const, null)
-const readingAtAtom = atom({ plugin: 'rate-limits', key: 'readingAt' } as const, 0)
-const nowAtom = atom({ plugin: 'rate-limits', key: 'now' } as const, 0)
-const toastedAtom = atom({ plugin: 'rate-limits', key: 'toasted' } as const, {})
+const limitsAtom = atom({ plugin: 'RateLimits', key: 'limits' } as const, [])
+const contextAtom = atom({ plugin: 'RateLimits', key: 'context' } as const, null)
+const readingAtAtom = atom({ plugin: 'RateLimits', key: 'readingAt' } as const, 0)
+const nowAtom = atom({ plugin: 'RateLimits', key: 'now' } as const, 0)
+const toastedAtom = atom({ plugin: 'RateLimits', key: 'toasted' } as const, {})
 
 // The store key every chat saves its latest reading under, for the next chat to start from.
 const LATEST = 'latest'

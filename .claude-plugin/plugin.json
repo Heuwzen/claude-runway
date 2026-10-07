@@ -1,5 +1,5 @@
 {
-  "name": "rate-limits",
+  "name": "RateLimits",
   "version": "0.4.0",
   "description": "Keeps your 5-hour and weekly rate limits on screen as live meters above the prompt, with a toast at 80% and 95%",
   "author": { "name": "Heuwzen", "url": "https://github.com/Heuwzen" },
