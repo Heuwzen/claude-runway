@@ -1,0 +1,20 @@
+{
+  "name": "MacLoad",
+  "version": "0.2.0",
+  "description": "Shows your Mac's CPU and memory under the prompt, names the app behind a slowdown, and warns when the Mac is overloaded",
+  "author": {
+    "name": "Heuwzen",
+    "url": "https://github.com/Heuwzen"
+  },
+  "homepage": "https://github.com/Heuwzen/claude-code-mac-load",
+  "repository": "https://github.com/Heuwzen/claude-code-mac-load",
+  "license": "MIT",
+  "keywords": [
+    "cpu",
+    "memory",
+    "load",
+    "simulator",
+    "mod"
+  ],
+  "types": "./types/index.d.ts"
+}
