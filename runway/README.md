@@ -29,6 +29,8 @@ Your limits also count what you use on claude.ai and in Claude's other apps, whi
 
 The meters always line up, whatever the text above them does. In the desktop app, each meter has one fact beside its number: when it resets, or when you'll hit the limit. In the terminal, Runway fits in more where there's room, such as how old the reading is, and drops it again as the window narrows.
 
+In a narrow chat, such as one with the iOS Simulator open beside it, the meters stay in one row and the text beside each number goes first. They stack only when even the numbers no longer fit side by side.
+
 ## Install
 
 Runway installs with the other mods in this repository. See the [main README](../README.md#install).

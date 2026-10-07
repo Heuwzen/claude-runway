@@ -26,7 +26,6 @@ const COLORS: Record<Severity, string> = {
 const MUTED = '#898781'
 
 const GAP = 3
-const MIN_TILE = 22
 const MAX_TILE = 48
 // More CSS pixels than a desktop cell holds, so a meter drawn this wide is
 // always narrowed to its tile rather than falling short of it.
@@ -35,12 +34,18 @@ const PX_PER_CELL = 9
 type Elements = Pick<ElementTable<'terminal'>, 'Box' | 'Text'>
 type Meter = (view: LimitView, width: number, color: string, alt: string) => RenderElement
 
-function layoutOf(columns: number, count: number) {
-  const fit = Math.floor((columns - GAP * (count - 1)) / count)
+// The cells a tile's figure takes at its widest, as in "Context ◆ 100%".
+const widestFigure = (label: string) => `${label} ◆ 100%`.length
 
-  return fit >= MIN_TILE
+// Side by side while every tile has room for its figure, so a narrow chat, such as one
+// beside a simulator, keeps one row and gives up the text beside the figures first.
+// Stacked, each tile takes the band's whole width.
+function layoutOf(columns: number, labels: readonly string[]) {
+  const fit = Math.floor((columns - GAP * (labels.length - 1)) / labels.length)
+
+  return fit >= Math.max(...labels.map(widestFigure))
     ? { direction: 'row' as const, tile: Math.min(MAX_TILE, fit) }
-    : { direction: 'column' as const, tile: Math.min(MAX_TILE, columns) }
+    : { direction: 'column' as const, tile: columns }
 }
 
 function altOf(limit: Limit, view: LimitView) {
@@ -208,7 +213,8 @@ function Band({ elements, limits, context, now, readingAt, columns, isBrief, met
     )
   }
 
-  const { direction, tile } = layoutOf(columns, limits.length + (context ? 1 : 0))
+  const labels = [...limits.map(limit => labelOf(limit.kind)), ...(context ? ['Context'] : [])]
+  const { direction, tile } = layoutOf(columns, labels)
   // The newest reading any chat has: too old, and its numbers are left out rather than shown wrong.
   const shape = { width: tile, isBrief, isOld: now - readingAt >= OLD_AFTER, meter }
   const all = [

@@ -215,7 +215,9 @@ export const briefDetailsOf = (view: LimitView) => brief(detailsOf(view))
 // The line beside a window whose reading is too old to show: when it reset, which stays
 // true however old the reading, else that there is nothing recent; fullest first.
 export function oldDetailsOf(view: LimitView): Segment[][] {
-  return view.hasReset ? detailsOf(view) : [[dim('no recent reading · a reply updates it')], [dim('no recent reading')]]
+  return view.hasReset
+    ? detailsOf(view)
+    : [[dim('no recent reading · a reply updates it')], [dim('no recent reading')], [dim('no reading')]]
 }
 
 // The line beside the context figure, fullest first.

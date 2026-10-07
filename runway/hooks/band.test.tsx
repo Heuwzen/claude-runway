@@ -87,22 +87,66 @@ test('draws a meter for each window on the terminal and the desktop', async ($, 
   }
 })
 
-test('stacks the meters when the band is narrow, and lines them up in one row when wide', async ($, on) => {
+type Found = { props: Record<string, unknown>; children: Found[] }
+
+const CONTEXT = { window: 200_000, tokens: 82_000, percent: 41 }
+
+test('lines the figures up in one row and the meters in the next', async ($, on) => {
   engine(on)
   await $.session.measure({ context: { window: 200_000 }, rateLimits: LIMITS, changed: ['rateLimits'] })
 
-  const narrow = await $.ui.mount({ plugin: 'Runway', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns: 40 } })
-  const stacked = (await narrow.find({ type: 'Box' }))?.children as { props: Record<string, unknown> }[]
-  expect(stacked.map(tile => tile.props.flexDirection)).toEqual(['column', 'column'])
-  await narrow.unmount()
-
-  // Wide: the figures in one row and the meters in the next, so the meters always line up.
   const wide = await $.ui.mount({ plugin: 'Runway', surface: 'desktop', ...BAND })
-  const rows = (await wide.find({ type: 'Box' }))?.children as { children: { props: Record<string, unknown> }[] }[]
+  const rows = (await wide.find({ type: 'Box' }))?.children as Found[]
   expect(rows.map(row => row.children.length)).toEqual([2, 2])
   // Each figure's cell is a column, so its header spans the tile and the detail sits at its right end.
   expect(rows[0]?.children.map(cell => cell.props.flexDirection)).toEqual(['column', 'column'])
   await wide.unmount()
+})
+
+test('keeps the meters side by side in a narrow chat, giving up the text beside the figures first', async ($, on) => {
+  engine(on)
+  await $.session.measure({ context: CONTEXT, rateLimits: LIMITS, changed: ['context', 'rateLimits'] })
+
+  for (const surface of SURFACES) {
+    // About the desktop band beside the iOS Simulator in the bug report.
+    const ui = await $.ui.mount({ plugin: 'Runway', surface, ...BAND, props: { ...BAND.props, bodyColumns: 65 } })
+    const rows = (await ui.find({ type: 'Box' }))?.children as Found[]
+    expect(rows.map(row => row.children.map(cell => cell.props.width))).toEqual([
+      [19, 19, 19],
+      [19, 19, 19],
+    ])
+    expect(await ui.find({ type: 'Text', text: '62%' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /resets in|limit in/ })).toBeUndefined()
+    // The context's count shrinks to fit rather than going.
+    expect(await ui.find({ type: 'Text', text: '82k' })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('stacks the meters across the whole band once even their figures no longer fit side by side', async ($, on) => {
+  engine(on)
+  await $.session.measure({ context: CONTEXT, rateLimits: LIMITS, changed: ['context', 'rateLimits'] })
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'Runway', surface, ...BAND, props: { ...BAND.props, bodyColumns: 40 } })
+    const tiles = (await ui.find({ type: 'Box' }))?.children as Found[]
+    expect(tiles.map(tile => [tile.props.flexDirection, tile.props.width])).toEqual([
+      ['column', 40],
+      ['column', 40],
+      ['column', 40],
+    ])
+    expect(await ui.find({ type: 'Text', text: 'resets in 1h' })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('says a narrow tile has no reading rather than leave it blank', async ($, on) => {
+  engine(on, { latest: { limits: LIMITS, at: NOW - 60 * 60_000 } }, CONTEXT)
+  await $.session.start(START)
+
+  const ui = await $.ui.mount({ plugin: 'Runway', surface: 'desktop', ...BAND, props: { ...BAND.props, bodyColumns: 65 } })
+  expect(await ui.findAll({ type: 'Text', text: 'no reading' })).toHaveLength(2)
+  await ui.unmount()
 })
 
 test('toasts once as a window crosses 80%, and again at 95%', async ($, on) => {
