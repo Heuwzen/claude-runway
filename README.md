@@ -1,4 +1,4 @@
-# commit-nudge
+# CommitNudge
 
 A quiet reminder for Claude Code when uncommitted work piles up in the chat's project, so a crash or a bad command cannot cost you hours of work.
 

@@ -4,9 +4,9 @@ import type { EngineInterface, ProcessRunResult, Register } from 'claude-code'
 import { commitAtSeconds, detailsOf, levelOf, parseLog, parseShortstat, parseStatus, projectOf, statusOf, stepOf, toastOf } from './format'
 import type { Snapshot } from './format'
 
-const topAtom = atom({ plugin: 'commit-nudge', key: 'top' } as const, null)
-const notifiedAtom = atom({ plugin: 'commit-nudge', key: 'notified' } as const, 0)
-const seenAtom = atom({ plugin: 'commit-nudge', key: 'seen' } as const, 0)
+const topAtom = atom({ plugin: 'CommitNudge', key: 'top' } as const, null)
+const notifiedAtom = atom({ plugin: 'CommitNudge', key: 'notified' } as const, 0)
+const seenAtom = atom({ plugin: 'CommitNudge', key: 'seen' } as const, 0)
 
 const COMMAND = 'commit-nudge'
 const EVERY_MS = 120_000
