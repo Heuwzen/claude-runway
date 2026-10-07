@@ -1,13 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { Limit } from '../types'
-import { formatDuration, isReading, labelOf, severityOf, thresholdOf, viewOf } from './format'
+import type { Context, Limit } from '../types'
+import { compactTokens, formatDuration, isReading, labelOf, severityOf, thresholdOf, viewOf } from './format'
 import type { LimitView, Severity } from './format'
 import { METER_HEIGHT, meterRuns, meterSvg } from './meter'
 import type { MeterRole } from './meter'
 
 const limitsAtom = atom({ plugin: 'rate-limits', key: 'limits' } as const, [])
+const contextAtom = atom({ plugin: 'rate-limits', key: 'context' } as const, null)
 const readingAtAtom = atom({ plugin: 'rate-limits', key: 'readingAt' } as const, 0)
 const nowAtom = atom({ plugin: 'rate-limits', key: 'now' } as const, 0)
 const toastedAtom = atom({ plugin: 'rate-limits', key: 'toasted' } as const, {})
@@ -61,12 +62,26 @@ function runStyle(role: MeterRole, color: string) {
   }
 }
 
+type FigureProps = { elements: Elements; label: string; percent: number }
+
+function Figure({ elements, label, percent }: FigureProps) {
+  const { Box, Text } = elements
+  const severity = severityOf(percent)
+
+  return (
+    <Box flexShrink={0}>
+      <Text>{`${label} `}</Text>
+      {severity !== 'normal' && <Text color={COLORS[severity]}>{severity === 'critical' ? '◆ ' : '▲ '}</Text>}
+      <Text bold>{`${Math.round(percent)}%`}</Text>
+    </Box>
+  )
+}
+
 type TileProps = { elements: Elements; limit: Limit; view: LimitView; width: number; meter: Meter }
 
 function Tile({ elements, limit, view, width, meter }: TileProps) {
   const { Box, Text } = elements
-  const severity = severityOf(view.percent)
-  const color = COLORS[severity]
+  const color = COLORS[severityOf(view.percent)]
   // One line beside the figure, the most urgent part first.
   const detail: RenderElement[] = []
 
@@ -93,11 +108,7 @@ function Tile({ elements, limit, view, width, meter }: TileProps) {
   return (
     <Box flexDirection="column" width={width}>
       <Box justifyContent="space-between" columnGap={1}>
-        <Box flexShrink={0}>
-          <Text>{`${labelOf(limit.kind)} `}</Text>
-          {severity !== 'normal' && <Text color={color}>{severity === 'critical' ? '◆ ' : '▲ '}</Text>}
-          <Text bold>{`${Math.round(view.percent)}%`}</Text>
-        </Box>
+        <Figure elements={elements} label={labelOf(limit.kind)} percent={view.percent} />
         {detail.length > 0 && <Text wrap="truncate-end">{detail}</Text>}
       </Box>
       {meter(view, width, color, altOf(limit, view))}
@@ -105,19 +116,39 @@ function Tile({ elements, limit, view, width, meter }: TileProps) {
   )
 }
 
+type ContextTileProps = { elements: Elements; context: Context; width: number; meter: Meter }
+
+function ContextTile({ elements, context, width, meter }: ContextTileProps) {
+  const { Box, Text } = elements
+  const color = COLORS[severityOf(context.percent)]
+
+  return (
+    <Box flexDirection="column" width={width}>
+      <Box justifyContent="space-between" columnGap={1}>
+        <Figure elements={elements} label="Context" percent={context.percent} />
+        <Text dimColor wrap="truncate-end">
+          {`${compactTokens(context.tokens)} of ${compactTokens(context.window)}`}
+        </Text>
+      </Box>
+      {meter({ percent: context.percent, hasReset: false }, width, color, `Context window, ${Math.round(context.percent)}% full`)}
+    </Box>
+  )
+}
+
 type BandProps = {
   elements: Elements
   limits: readonly Limit[]
+  context: Context | null
   now: number
   readingAt: number
   columns: number
   meter: Meter
 }
 
-function Band({ elements, limits, now, readingAt, columns, meter }: BandProps) {
+function Band({ elements, limits, context, now, readingAt, columns, meter }: BandProps) {
   const { Box, Text } = elements
 
-  if (limits.length === 0) {
+  if (limits.length === 0 && !context) {
     return (
       <Box>
         <Text dimColor>Rate limits show up here after the first reply</Text>
@@ -125,15 +156,25 @@ function Band({ elements, limits, now, readingAt, columns, meter }: BandProps) {
     )
   }
 
-  const { direction, tile } = layoutOf(columns, limits.length)
+  const { direction, tile } = layoutOf(columns, limits.length + (context ? 1 : 0))
 
   return (
     <Box flexDirection={direction} columnGap={GAP}>
       {limits.map(limit => (
         <Tile elements={elements} limit={limit} view={viewOf(limit, now, readingAt)} width={tile} meter={meter} />
       ))}
+      {context && <ContextTile elements={elements} context={context} width={tile} meter={meter} />}
     </Box>
   )
+}
+
+// Keep this chat's context fill once a reply has reported it.
+async function measureContext($: EngineInterface, usage: { tokens?: number; window: number; percent?: number }) {
+  const { tokens, window, percent } = usage
+
+  if (tokens !== undefined && percent !== undefined) {
+    await update($, contextAtom, () => ({ tokens, window, percent }))
+  }
 }
 
 async function tick($: EngineInterface) {
@@ -193,7 +234,8 @@ async function alert($: EngineInterface, limits: readonly Limit[]) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const { rateLimits } = await $.session.usage()
+    const { rateLimits, context } = await $.session.usage()
+    await measureContext($, context)
 
     if (rateLimits.length > 0 && (await read($, readingAtAtom)) === 0) {
       await adopt($, [...rateLimits], await $.clock.now(), true)
@@ -207,6 +249,8 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
+    await measureContext($, e.context)
+
     if (e.rateLimits.length > 0) {
       await adopt($, [...e.rateLimits], await $.clock.now(), true)
 
@@ -226,6 +270,7 @@ export const register: Register = on => {
     }
 
     const limits = await read($, limitsAtom)
+    const context = await read($, contextAtom)
     const readingAt = await read($, readingAtAtom)
     const now = (await read($, nowAtom)) || (await $.clock.now())
     const columns = e.props.bodyColumns
@@ -241,7 +286,7 @@ export const register: Register = on => {
       )
 
       return (
-        <Band elements={{ Box, Text }} limits={limits} now={now} readingAt={readingAt} columns={columns} meter={meter} />
+        <Band elements={{ Box, Text }} limits={limits} context={context} now={now} readingAt={readingAt} columns={columns} meter={meter} />
       )
     }
 
@@ -256,7 +301,7 @@ export const register: Register = on => {
       )
 
       return (
-        <Band elements={{ Box, Text }} limits={limits} now={now} readingAt={readingAt} columns={columns} meter={meter} />
+        <Band elements={{ Box, Text }} limits={limits} context={context} now={now} readingAt={readingAt} columns={columns} meter={meter} />
       )
     }
 

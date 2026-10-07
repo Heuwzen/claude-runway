@@ -17,6 +17,7 @@ In the terminal:
 - **A tick on each meter** marking how far through the window you are. Fill past the tick means you are using the limit faster than it resets.
 - **A forecast** when you are on course to run out before the reset, such as "→ limit in ~22m".
 - **Reset countdowns**, and a toast when a window crosses 80% and again at 95%.
+- **How full this chat's context window is**, as a third meter, once a reply has reported it.
 - **Your limits as soon as a chat opens.** Each chat saves its latest reading, and a new chat shows the newest one ("as of 12m ago") until its own first reply. Open chats also pick up newer readings from each other once a minute.
 
 It reads the rate-limit information Claude Code already receives with each reply. It makes no requests of its own, and nothing leaves your machine.

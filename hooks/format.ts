@@ -98,6 +98,19 @@ export function paceOf(limit: Limit, now: number): Pace | undefined {
     : { elapsed, outlook: 'on-track' }
 }
 
+// Token counts as people say them: 950, 82k, 1.2M.
+export function compactTokens(count: number) {
+  if (count < 1000) {
+    return String(count)
+  }
+
+  if (count < 1_000_000) {
+    return `${Math.round(count / 1000)}k`
+  }
+
+  return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+}
+
 // A reading older than this is shown with its age, and without a forecast.
 export const STALE_AFTER = 2 * 60_000
 

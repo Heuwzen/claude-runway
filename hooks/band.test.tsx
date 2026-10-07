@@ -137,3 +137,25 @@ test("saves this chat's reading for the next chat", async ($, on) => {
 
   expect(stored.latest).toEqual({ limits: LIMITS, at: NOW })
 })
+
+test("adds this chat's context fill as a third meter once a reply reports it", async ($, on) => {
+  engine(on)
+  await $.session.measure({
+    context: { window: 200_000, tokens: 82_000, percent: 41 },
+    rateLimits: LIMITS,
+    changed: ['context', 'rateLimits'],
+  })
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'rate-limits', surface, ...BAND })
+    expect(await ui.find({ type: 'Text', text: 'Context ' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '41%' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '82k of 200k' })).toBeDefined()
+
+    if (surface === 'desktop') {
+      expect(await ui.findAll({ type: 'Svg' })).toHaveLength(3)
+    }
+
+    await ui.unmount()
+  }
+})

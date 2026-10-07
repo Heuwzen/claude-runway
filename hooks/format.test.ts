@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isReading, labelOf, paceOf, thresholdOf, timeUntil, viewOf } from './format'
+import { compactTokens, isReading, labelOf, paceOf, thresholdOf, timeUntil, viewOf } from './format'
 import { meterRuns, meterSvg } from './meter'
 
 const NOW = Date.parse('2026-10-07T12:00:00Z')
@@ -94,4 +94,8 @@ test('only well-formed saved readings are used', async () => {
   expect(isReading({ limits: [{ kind: 'five_hour' }], at: 1 })).toBe(false)
   expect(isReading({ limits: 'x', at: 1 })).toBe(false)
   expect(isReading({ limits: [] })).toBe(false)
+})
+
+test('writes token counts the way people say them', async () => {
+  expect([950, 82_000, 82_499, 1_000_000, 1_240_000].map(compactTokens)).toEqual(['950', '82k', '82k', '1M', '1.2M'])
 })
