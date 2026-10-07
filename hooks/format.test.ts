@@ -6,12 +6,15 @@ import {
   appsOf,
   cpuLevelOf,
   culpritOf,
+  detailsOf,
   formatBytes,
   formatCores,
   keepTop,
   levelsOf,
   memoryLevelOf,
   parseIostat,
+  cpuOf,
+  isReading,
   parsePs,
   parseSimulators,
   parseSysctl,
@@ -76,12 +79,23 @@ test('reads the cores, memory, pressure, load and swap, whichever this Mac has',
 })
 
 test('reads ps rows, names with spaces included', async () => {
-  const text = '    1   0.6 /sbin/launchd\n91104  19,2 /Applications/Claude.app/Contents/MacOS/Claude Helper (Renderer)  \n  739   0.0 Core Audio Driver (X.driver)\n'
+  const text = '    1     0   0.6 /sbin/launchd\n91104     1  19,2 /Applications/Claude.app/Contents/MacOS/Claude Helper (Renderer)  \n  739     1   0.0 Core Audio Driver (X.driver)\n 5120   739   1.0 /Applications/Café 日本.app/Contents/MacOS/Café\n'
   expect(parsePs(text)).toEqual([
-    { pid: 1, cpu: 0.6, command: '/sbin/launchd' },
-    { pid: 91104, cpu: 19.2, command: '/Applications/Claude.app/Contents/MacOS/Claude Helper (Renderer)' },
-    { pid: 739, cpu: 0, command: 'Core Audio Driver (X.driver)' },
+    { pid: 1, ppid: 0, cpu: 0.6, command: '/sbin/launchd' },
+    { pid: 91104, ppid: 1, cpu: 19.2, command: '/Applications/Claude.app/Contents/MacOS/Claude Helper (Renderer)' },
+    { pid: 739, ppid: 1, cpu: 0, command: 'Core Audio Driver (X.driver)' },
+    { pid: 5120, ppid: 739, cpu: 1, command: '/Applications/Café 日本.app/Contents/MacOS/Café' },
   ])
+})
+
+test("sums the processes' own figures for the CPU when iostat gives none", async () => {
+  const processes = [
+    { pid: 1, ppid: 0, cpu: 250, command: '/x' },
+    { pid: 2, ppid: 1, cpu: 50, command: '/y' },
+  ]
+  expect(cpuOf(processes, 10)).toBe(30)
+  expect(cpuOf([{ pid: 1, ppid: 0, cpu: 2400, command: '/x' }], 10)).toBe(100)
+  expect(cpuOf([], 10)).toBe(undefined)
 })
 
 test("reads each process's memory footprint from top", async () => {
@@ -109,7 +123,21 @@ test('puts each process with its app', async () => {
     ['/Applications/Xcode-beta.app/Contents/Developer/usr/bin/xcodebuild', 'Xcode'],
     ['/Library/Developer/Toolchains/swift-6.2-RELEASE.xctoolchain/usr/bin/swift-frontend', 'Xcode'],
     ['/Library/Developer/CommandLineTools/usr/bin/clang', 'Xcode'],
-    ['/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent', 'Safari'],
+    ['/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld', 'Xcode'],
+    ['/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent', 'Web pages'],
+    ['/System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine', 'Virtual machine'],
+    // Xcode itself and its builds count as Xcode; other tools that ship inside it do not.
+    ['/Applications/Xcode.app/Contents/MacOS/Xcode', 'Xcode'],
+    ['/Applications/Xcode.app/Contents/SharedFrameworks/SwiftBuild.framework/Versions/A/PlugIns/SWBBuildService.bundle/Contents/MacOS/SWBBuildService', 'Xcode'],
+    ['/Applications/Xcode.app/Contents/SharedFrameworks/SourceKit.framework/Versions/A/XPCServices/SourceKitService.xpc/Contents/MacOS/SourceKitService', 'Xcode'],
+    ['/Applications/Xcode-beta.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python', 'Python'],
+    ['/Applications/Xcode-beta.app/Contents/Developer/usr/bin/git', 'git'],
+    ['/Library/Developer/CommandLineTools/usr/bin/make', 'make'],
+    ['/usr/local/bin/node', 'node'],
+    ['/usr/local/Cellar/ollama/0.9.0/bin/ollama', 'ollama'],
+    ['/Applications/iTerm.app/Contents/MacOS/iTerm2', 'iTerm'],
+    ['/Applications/Café 日本.app/Contents/MacOS/Café', 'Café 日本'],
+    ['/System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow', 'macOS'],
     ['/Applications/Brave Browser.app/Contents/Frameworks/Brave Browser Framework.framework/Helpers/Brave Browser Helper.app/Contents/MacOS/Brave Browser Helper', 'Brave Browser'],
     ['/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder', 'Finder'],
     ['/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer', 'macOS'],
@@ -128,11 +156,11 @@ test("adds up each app's processes, busiest first, naming its busiest two", asyn
   const runtime = '/Library/Developer/CoreSimulator/Volumes/iOS/RuntimeRoot'
   const apps = appsOf(
     [
-      { pid: 1, cpu: 75, command: '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer' },
-      { pid: 2, cpu: 50, command: `${runtime}/EmojiPosterExtension` },
-      { pid: 3, cpu: 50, command: `${runtime}/EmojiPosterExtension` },
-      { pid: 4, cpu: 25, command: `${runtime}/KaleidoscopePoster` },
-      { pid: 5, cpu: 0, command: `${runtime}/sbin/launchd_sim` },
+      { pid: 1, ppid: 0, cpu: 75, command: '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer' },
+      { pid: 2, ppid: 1, cpu: 50, command: `${runtime}/EmojiPosterExtension` },
+      { pid: 3, ppid: 1, cpu: 50, command: `${runtime}/EmojiPosterExtension` },
+      { pid: 4, ppid: 1, cpu: 25, command: `${runtime}/KaleidoscopePoster` },
+      { pid: 5, ppid: 1, cpu: 0, command: `${runtime}/sbin/launchd_sim` },
     ],
     new Map([[1, 800], [2, 100]]),
   )
@@ -146,8 +174,15 @@ test("adds up each app's processes, busiest first, naming its busiest two", asyn
     },
     { name: 'macOS', cores: 0.75, bytes: 800, processes: [{ name: 'WindowServer', count: 1, cores: 0.75 }] },
   ])
-  expect(appsOf([{ pid: 1, cpu: 40, command: '/sbin/launchd' }])[0]?.bytes).toBe(undefined)
-  expect(simulatorsOf([{ pid: 5, cpu: 1, command: '/x/sbin/launchd_sim' }, { pid: 6, cpu: 0, command: 'launchd_sim' }])).toBe(2)
+  expect(appsOf([{ pid: 1, ppid: 0, cpu: 40, command: '/sbin/launchd' }])[0]?.bytes).toBe(undefined)
+  expect(simulatorsOf([{ pid: 5, ppid: 1, cpu: 1, command: '/x/sbin/launchd_sim' }, { pid: 6, ppid: 1, cpu: 0, command: 'launchd_sim' }])).toBe(2)
+  // A simulator's children count as Simulator even without a path.
+  const children = appsOf([
+    { pid: 5, ppid: 1, cpu: 0, command: '/x/sbin/launchd_sim' },
+    { pid: 7, ppid: 5, cpu: 300, command: 'assetsd' },
+    { pid: 8, ppid: 1, cpu: 50, command: 'assetsd' },
+  ])
+  expect(children.map(found => [found.name, found.cores])).toEqual([['Simulator', 3], ['assetsd', 0.5]])
 })
 
 test('keeps the busiest apps and the largest, in order of how busy', async () => {
@@ -201,6 +236,9 @@ test('names the app behind the worst strain, and none when nothing stands out', 
   expect(culpritOf(busy, { ...CALM, cpu: 'busy', memory: 'overloaded' })?.text).toBe('Claude using 2 GB')
   expect(culpritOf(busy, CALM)).toBe(undefined)
   expect(culpritOf(reading({ apps: [app('macOS', 0.3)] }), { ...CALM, cpu: 'busy' })).toBe(undefined)
+  // 0.6 cores is too small a share of 9.5 busy cores to blame; the kernel, which ps never lists, may hold the rest.
+  expect(culpritOf(reading({ cpu: 95, apps: [app('Brave Browser', 0.6)] }), { ...CALM, cpu: 'busy' })).toBe(undefined)
+  expect(culpritOf(reading({ cpu: 95, apps: [app('Brave Browser', 2.4)] }), { ...CALM, cpu: 'busy' })?.text).toBe('Brave Browser using 2 cores')
   expect(culpritOf(reading({ apps: [app('Xcode', 4)] }), { ...CALM, memory: 'busy' })).toBe(undefined)
   // When no app stands out for the worse strain, the other strain's app is named.
   expect(culpritOf(reading({ apps: [app('macOS', 0.3, 2 * 1024 ** 3)] }), { ...CALM, cpu: 'busy', memory: 'busy' })?.text).toBe('macOS using 2 GB')
@@ -243,4 +281,17 @@ test('names simulator runtimes and reads the booted devices', async () => {
   expect(parseSimulators(text)).toEqual([{ name: 'iPhone 17 Pro', runtime: 'iOS 27.0' }])
   expect(parseSimulators('not json')).toEqual([])
   expect(parseSimulators('null')).toEqual([])
+})
+
+test('takes back from the store only a reading this version wrote', async () => {
+  expect(isReading(reading())).toBe(true)
+  expect(isReading({ load: [3, 3, 3], cores: 10, memoryFree: 40, simulators: [] })).toBe(false)
+  expect(isReading({ ...reading(), apps: [{ name: 'X' }] })).toBe(false)
+  expect(isReading(null)).toBe(false)
+})
+
+test('/mac-load says how many booted simulators simctl could not name', async () => {
+  const text = detailsOf(reading({ simulators: 2 }), CALM, [{ name: 'iPhone 17 Pro', runtime: 'iOS 27.0' }])
+  expect(text).toContain('Simulators booted: 2 (iPhone 17 Pro on iOS 27.0, 1 more)')
+  expect(detailsOf(reading({ simulators: 1 }), CALM, [])).toContain('Simulators booted: 1\n')
 })

@@ -41,8 +41,9 @@ export type Reading = {
 declare module 'claude-code' {
   interface PluginState {
     'mac-load': {
-      // The latest reading, or null before the first.
-      reading: Reading | null
+      // The latest reading, or null before the first. Shaped: a reload of code that changed
+      // its idea of a reading finds the old one absent rather than misreading it.
+      reading: Shaped<Reading | null>
       levels: Levels
       // Set once the mod gives up on a system it has never read: nothing is polled or shown after.
       isStopped: boolean

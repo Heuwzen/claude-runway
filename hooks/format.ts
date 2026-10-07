@@ -11,8 +11,13 @@ export const SIMULATORS_BUSY = 3
 export const MEMORY_BUSY = 85
 export const MEMORY_OVERLOADED = 92
 
+// The least share of the busy cores an app needs to be named as the cause.
+export const CULPRIT_SHARE = 0.25
+
 // A reading older than this is shown with its age: the Mac has not answered in time since.
 export const STALE_AFTER = 75_000
+// A reading another chat took within this long is used as it is, rather than read again.
+export const FRESH_FOR = 25_000
 // One toast per overload: this chat says nothing again for this long.
 export const TOAST_COOLDOWN = 10 * 60_000
 
@@ -32,7 +37,6 @@ const PRESSURES: Record<string, Pressure> = { '1': 'normal', '2': 'warning', '4'
 
 const number = (text: string) => (NUMBER.test(text) ? Number(text.replace(',', '.')) : NaN)
 const basename = (command: string) => command.slice(command.lastIndexOf('/') + 1)
-const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 
 // "1586.19M", as sysctl and top write sizes.
 function bytesOf(text: string) {
@@ -111,27 +115,39 @@ export function parseSysctl(text: string): System {
   return system
 }
 
-// One process: the share of one core it keeps busy, and its executable, by full path
-// where macOS gives one.
-export type Process = { pid: number; cpu: number; command: string }
+// One process: its parent, the share of one core it keeps busy, and its executable, by
+// full path where macOS gives one.
+export type Process = { pid: number; ppid: number; cpu: number; command: string }
 
-// `ps -A -o pid=,pcpu=,comm=`.
+// `ps -A -o pid=,ppid=,pcpu=,comm=`.
 export function parsePs(text: string): Process[] {
   const processes: Process[] = []
 
   for (const line of text.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+(?:[.,]\d+)?)\s+(\S.*?)\s*$/.exec(line)
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+(?:[.,]\d+)?)\s+(\S.*?)\s*$/.exec(line)
 
     if (match !== null) {
-      processes.push({ pid: Number(match[1]), cpu: number(match[2] ?? ''), command: match[3] ?? '' })
+      processes.push({ pid: Number(match[1]), ppid: Number(match[2]), cpu: number(match[3] ?? ''), command: match[4] ?? '' })
     }
   }
 
   return processes
 }
 
-// `top -l 1 -o mem -n 100 -stats pid,mem`: the memory footprint of each process listed,
-// the figure Activity Monitor shows, by process id.
+// How busy the cores are by the processes' own figures: the stand-in when iostat does not
+// answer. Less exact, since ps lists neither the kernel nor processes that already ended.
+export function cpuOf(processes: readonly Process[], cores: number) {
+  if (processes.length === 0) {
+    return undefined
+  }
+
+  const busy = processes.reduce((sum, process) => sum + (Number.isFinite(process.cpu) ? process.cpu : 0), 0)
+
+  return Math.min(100, busy / cores)
+}
+
+// `top -l 1 -o mem -stats pid,mem`: the memory footprint of every process, the figure
+// Activity Monitor shows, by process id.
 export function parseTop(text: string) {
   const footprints = new Map<number, number>()
 
@@ -147,8 +163,35 @@ export function parseTop(text: string) {
   return footprints
 }
 
+// Xcode itself and the processes of a build, by name. Other programs that ship inside the
+// developer tools, such as git, make and python3, count under their own names.
+const XCODE_PROCESSES = new Set([
+  'Xcode',
+  'xcodebuild',
+  'swift',
+  'swiftc',
+  'clang',
+  'clang++',
+  'ld',
+  'ld64',
+  'libtool',
+  'lipo',
+  'ibtool',
+  'ibtoold',
+  'actool',
+  'momc',
+  'mapc',
+  'xctest',
+  'debugserver',
+  'SourceKitService',
+])
+const XCODE_PREFIXES = ['swift-', 'XCB', 'SWB', 'IBAgent', 'com.apple.dt.', 'lldb']
+
+const isDeveloperTool = (command: string) =>
+  /\/Xcode[^/]*\.app\//.test(command) || command.includes('.xctoolchain/') || command.startsWith('/Library/Developer/CommandLineTools/')
+
 // The app a process belongs to, by where its executable lives: the simulators and Xcode's
-// tools first, then the outermost .app bundle, then macOS's own folders.
+// builds first, then the outermost .app bundle, then macOS's own folders.
 export function appOf(command: string) {
   const name = basename(command)
 
@@ -156,19 +199,29 @@ export function appOf(command: string) {
     return 'Simulator'
   }
 
-  if (/\/Xcode[^/]*\.app\//.test(command) || command.includes('.xctoolchain/') || command.startsWith('/Library/Developer/CommandLineTools/')) {
-    return 'Xcode'
+  if (isDeveloperTool(command)) {
+    return XCODE_PROCESSES.has(name) || XCODE_PREFIXES.some(prefix => name.startsWith(prefix)) ? 'Xcode' : name
   }
 
-  // WebKit's own processes draw and run web pages, Safari's above all.
+  // WebKit draws web pages in processes of its own, for Safari and for any app with a web view.
   if (command.includes('/com.apple.WebKit.')) {
-    return 'Safari'
+    return 'Web pages'
   }
 
-  const bundle = /\/([^/]+)\.app\//.exec(command)
+  // A virtual machine's guest (Docker, OrbStack, UTM) runs in a process of Apple's framework.
+  if (command.includes('/com.apple.Virtualization.VirtualMachine')) {
+    return 'Virtual machine'
+  }
 
-  if (bundle !== null) {
-    return capitalize(bundle[1] ?? name)
+  const bundle = /\/([^/]+)\.app\//.exec(command)?.[1]
+
+  if (bundle !== undefined) {
+    // Claude Code's own bundle is lower case; macOS's lower-case bundles are its daemons.
+    if (bundle === 'claude') {
+      return 'Claude'
+    }
+
+    return command.startsWith('/System/') && /^[a-z]/.test(bundle) ? 'macOS' : bundle
   }
 
   // Claude Code in a terminal, installed outside any app.
@@ -176,20 +229,26 @@ export function appOf(command: string) {
     return 'Claude'
   }
 
-  return /^\/(?:System|usr|bin|sbin|Library\/Apple)\//.test(command) ? 'macOS' : name
+  // /usr/local is Homebrew's on Intel Macs, not macOS's.
+  return /^\/(?:System|bin|sbin|Library\/Apple|usr(?!\/local\/))\//.test(command) ? 'macOS' : name
 }
 
-export const simulatorsOf = (processes: readonly Process[]) =>
-  processes.filter(process => basename(process.command) === 'launchd_sim').length
+const isSimulatorLaunchd = (process: Process) => basename(process.command) === 'launchd_sim'
+
+// Each booted simulator runs one launchd_sim: iOS, watchOS, tvOS and visionOS ones, and
+// those Xcode boots for its previews.
+export const simulatorsOf = (processes: readonly Process[]) => processes.filter(isSimulatorLaunchd).length
 
 // Each app's processes together, busiest first, with the busiest two of them by name.
-// Memory is added up only from `footprints`, when it was read.
+// A simulator's children count as Simulator even where ps gives them no path. Memory is
+// added up only from `footprints`, when it was read.
 export function appsOf(processes: readonly Process[], footprints?: ReadonlyMap<number, number>): App[] {
   type Tally = { cores: number; bytes: number; processes: Map<string, { count: number; cores: number }> }
   const tallies = new Map<string, Tally>()
+  const simulators = new Set(processes.filter(isSimulatorLaunchd).map(process => process.pid))
 
   for (const process of processes) {
-    const name = appOf(process.command)
+    const name = simulators.has(process.ppid) ? 'Simulator' : appOf(process.command)
     const tally = tallies.get(name) ?? { cores: 0, bytes: 0, processes: new Map() }
     const own = tally.processes.get(basename(process.command)) ?? { count: 0, cores: 0 }
     const cores = Number.isFinite(process.cpu) ? process.cpu / 100 : 0
@@ -289,13 +348,15 @@ function formatAge(ms: number) {
 
 // The app behind the worst strain: the busiest by CPU when the CPU is at least as strained
 // as memory, else the largest by memory, falling back on the other strain's app when none
-// stands out. None while nothing is strained.
+// stands out. For the CPU an app stands out with half a core and a quarter of the busy
+// cores: the kernel's work, which ps never lists, may be the rest. None while nothing is strained.
 export function culpritOf(reading: Reading, levels: Levels) {
   const cpu = RANKS[levels.cpu]
   const memory = RANKS[levels.memory]
   const busiest = reading.apps[0]
   const largest = [...reading.apps].sort(byBytes)[0]
-  const byCpu = cpu === 0 || busiest === undefined || busiest.cores < 0.5
+  const busyCores = (reading.cpu / 100) * reading.cores
+  const byCpu = cpu === 0 || busiest === undefined || busiest.cores < Math.max(0.5, CULPRIT_SHARE * busyCores)
     ? undefined
     : { name: busiest.name, text: `${busiest.name} using ${formatCores(busiest.cores)}` }
   const byMemory = memory === 0 || largest?.bytes === undefined || largest.bytes === 0
@@ -438,7 +499,12 @@ export function detailsOf(reading: Reading, levels: Levels, simulators: readonly
   }
 
   if (reading.simulators > 0) {
-    const names = simulators.map(simulator => `${simulator.name} on ${simulator.runtime}`).join(', ')
+    // Xcode's previews boot simulators of their own, which simctl does not list.
+    const unnamed = reading.simulators - simulators.length
+    const names = [
+      ...simulators.map(simulator => `${simulator.name} on ${simulator.runtime}`),
+      ...(unnamed > 0 && simulators.length > 0 ? [`${unnamed} more`] : []),
+    ].join(', ')
     lines.push(`Simulators booted: ${MARKS[levels.simulators]}${reading.simulators}${names === '' ? '' : ` (${names})`}`)
   }
 
@@ -458,4 +524,17 @@ export function detailsOf(reading: Reading, levels: Levels, simulators: readonly
   }
 
   return lines.join('\n')
+}
+
+// Whether a value read back from the store is a reading this version of the mod wrote.
+export function isReading(value: unknown): value is Reading {
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+
+  const { at, cpu, cores, simulators, apps } = value as Partial<Reading>
+
+  return [at, cpu, cores, simulators].every(field => typeof field === 'number' && Number.isFinite(field))
+    && Array.isArray(apps)
+    && apps.every(app => typeof app?.name === 'string' && typeof app.cores === 'number' && Array.isArray(app.processes))
 }

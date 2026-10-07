@@ -3,10 +3,13 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Levels, Reading } from '../types'
 import {
+  FRESH_FOR,
   SYSCTL_NAMES,
   TOAST_COOLDOWN,
   appsOf,
+  cpuOf,
   detailsOf,
+  isReading,
   keepTop,
   levelsOf,
   memoryLevelOf,
@@ -23,7 +26,7 @@ import {
 
 const CALM: Levels = { cpu: 'normal', memory: 'normal', simulators: 'normal' }
 
-const readingAtom = atom({ plugin: 'mac-load', key: 'reading' } as const, null)
+const readingAtom = atom({ plugin: 'mac-load', key: 'reading' } as const, null, { shape: 'reading-2' })
 const levelsAtom = atom({ plugin: 'mac-load', key: 'levels' } as const, CALM)
 const stoppedAtom = atom({ plugin: 'mac-load', key: 'isStopped' } as const, false)
 const failuresAtom = atom({ plugin: 'mac-load', key: 'failures' } as const, 0)
@@ -35,45 +38,58 @@ const POLL_MS = 30_000
 const TIMEOUT_MS = 10_000
 // Failed readings in a row after which the mod gives up, on a system it has never read.
 const MAX_FAILURES = 3
-// The store key set once a reading has worked on this Mac, for every later chat.
+// The store keys: set once a reading has worked on this Mac, for every later chat; and the
+// latest reading, which every open chat shows rather than each reading the Mac itself.
 const WORKED = 'worked'
+const SHARED = 'reading'
 
 // Absolute paths, so no program of the same name earlier on the PATH runs instead; the C
-// locale, so numbers come with decimal points. Each only reads.
+// locale, so numbers come with decimal points. ps alone runs in UTF-8, which keeps app
+// names such as "Café" whole where C would escape them; its numbers parse either way.
+// Each only reads.
 const IOSTAT = ['/usr/sbin/iostat', '-n0', '-c', '2', '-w', '2']
-const PS = ['/bin/ps', '-A', '-o', 'pid=,pcpu=,comm=']
+const PS = ['/bin/ps', '-A', '-o', 'pid=,ppid=,pcpu=,comm=']
 const SYSCTL = ['/usr/sbin/sysctl', ...SYSCTL_NAMES]
-const TOP = ['/usr/bin/top', '-l', '1', '-o', 'mem', '-n', '100', '-stats', 'pid,mem']
+const TOP = ['/usr/bin/top', '-l', '1', '-o', 'mem', '-stats', 'pid,mem']
 const SIMCTL = ['/usr/bin/xcrun', 'simctl', 'list', 'devices', 'booted', '--json']
-const ENV = { LC_ALL: 'C' }
+const C = { LC_ALL: 'C' }
+const UTF8 = { LC_ALL: 'en_US.UTF-8' }
 
 // These live as long as this load of the module; a hot reload drops the old timer itself.
 let timer: { cancel: () => void } | undefined
 let isPolling = false
 let shown: string | undefined
 
-// What a command printed, or undefined when it cannot start or runs out of time.
-async function run($: EngineInterface, argv: readonly string[]) {
+// What a command printed, or undefined when it cannot start or runs out of time. It runs
+// in / rather than the session's folder, which may since have been deleted.
+async function run($: EngineInterface, argv: readonly string[], env: Record<string, string> = C) {
   try {
-    return await $.process.run(argv, { timeoutMs: TIMEOUT_MS, env: ENV })
+    return await $.process.run(argv, { cwd: '/', timeoutMs: TIMEOUT_MS, env })
   } catch {
     return undefined
   }
 }
 
-// Reads the Mac once; undefined when the CPU or the cores cannot be read. Each app's memory
-// is read too `withMemory`, or while memory is strained and the culprit is wanted.
+// Reads the Mac once; undefined when the cores, or the CPU by any means, cannot be read.
+// Each app's memory is read too `withMemory`, or while memory is strained and the culprit
+// is wanted.
 async function measure($: EngineInterface, withMemory: boolean): Promise<Reading | undefined> {
-  const [iostat, ps, sysctl] = await Promise.all([run($, IOSTAT), run($, PS), run($, SYSCTL)])
-  const cpu = iostat?.exitCode === 0 ? parseIostat(iostat.stdout) : undefined
+  const [iostat, ps, sysctl] = await Promise.all([run($, IOSTAT), run($, PS, UTF8), run($, SYSCTL)])
   // sysctl exits 1 when this Mac lacks one of the names, and writes the others all the same.
   const { cores, ...system } = parseSysctl(sysctl?.stdout ?? '')
+  const processes = ps?.exitCode === 0 ? parsePs(ps.stdout) : []
 
-  if (cpu === undefined || cores === undefined) {
+  if (cores === undefined) {
     return undefined
   }
 
-  const processes = ps?.exitCode === 0 ? parsePs(ps.stdout) : []
+  // A Mac too busy for iostat's two seconds still answers ps.
+  const cpu = (iostat?.exitCode === 0 ? parseIostat(iostat.stdout) : undefined) ?? cpuOf(processes, cores)
+
+  if (cpu === undefined) {
+    return undefined
+  }
+
   let footprints: Map<number, number> | undefined
 
   if (processes.length > 0 && (withMemory || memoryLevelOf(system) !== 'normal')) {
@@ -135,9 +151,33 @@ async function markWorked($: EngineInterface) {
   }
 }
 
+// The reading another chat stored within FRESH_FOR, if any.
+async function sharedReading($: EngineInterface, now: number) {
+  try {
+    const stored = await $.store.get(SHARED)
+
+    return isReading(stored) && now - stored.at < FRESH_FOR ? stored : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function share($: EngineInterface, reading: Reading) {
+  try {
+    await $.store.set(SHARED, reading)
+  } catch {
+    // Other chats read the Mac themselves.
+  }
+}
+
 async function take($: EngineInterface) {
-  const reading = await measure($, false)
+  const shared = await sharedReading($, await $.clock.now())
+  const reading = shared ?? (await measure($, false))
   const now = await $.clock.now()
+
+  if (reading !== undefined && shared === undefined) {
+    await share($, reading)
+  }
 
   if (reading === undefined) {
     const failures = (await read($, failuresAtom)) + 1
@@ -188,8 +228,8 @@ async function poll($: EngineInterface) {
   }
 }
 
-// Starts the readings once per load of this module: at the session's start, and from later
-// events in case a hot reload dropped the timer.
+// Starts the readings once per load of this module: at the session's start, which fires
+// again after a reload, and on each reply in case that start's hook failed.
 function ensurePolling($: EngineInterface) {
   if (timer !== undefined) {
     return
@@ -205,6 +245,8 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mac-load',
       description: 'Show what is using your Mac: CPU, memory and simulators, by app',
+      // A slow Mac is when it is wanted, often while a turn is still running.
+      immediate: true,
     })
 
     ensurePolling($)
@@ -216,6 +258,13 @@ export const register: Register = on => {
     if (!(await read($, stoppedAtom))) {
       ensurePolling($)
     }
+
+    return next(e)
+  })
+
+  // A /clear ends the session's state but not this module: the line is drawn afresh.
+  on('session.end', async ($, e, next) => {
+    shown = undefined
 
     return next(e)
   })
