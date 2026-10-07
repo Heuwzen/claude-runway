@@ -25,6 +25,7 @@ type World = {
   sysctl?: string
   top?: string
   simctl?: string
+  osascript?: string
   // Programs that cannot start, as on a system without them.
   missing?: string[]
 }
@@ -60,6 +61,7 @@ const calm = (): World => ({
   ps: ps([[601, 40, WINDOW_SERVER], [91104, 60, CLAUDE], [44001, 0, LAUNCHD_SIM]]),
   top: top([[91104, '1240M'], [601, '760M'], [44001, '12M']]),
   simctl: BOOTED,
+  osascript: '',
 })
 
 // Xcode building on every core, with Claude beside it.
@@ -74,6 +76,7 @@ const PROGRAMS: Record<string, keyof World> = {
   '/usr/sbin/sysctl': 'sysctl',
   '/usr/bin/top': 'top',
   '/usr/bin/xcrun': 'simctl',
+  '/usr/bin/osascript': 'osascript',
 }
 
 // Stands in for the host beneath the plugin: its commands (answered from `world`, and
@@ -124,8 +127,10 @@ function engine(on: On, world: World, stored: Record<string, unknown> = {}) {
   })
 
   const programs = () => calls.map(call => call.argv[0])
+  // The macOS notifications posted, by the AppleScript that posted each.
+  const notifications = () => calls.filter(call => call.argv[0] === '/usr/bin/osascript').map(call => call.argv[2])
 
-  return { toasts, status, calls, commands, programs, clock, stored }
+  return { toasts, status, calls, commands, programs, notifications, clock, stored }
 }
 
 test('shows CPU, memory and booted simulators from the start', async ($, on) => {
@@ -203,15 +208,18 @@ test('holds a busy CPU until it falls well below where it started', async ($, on
   expect(status.at(-1)).toStartWith('CPU 64%')
 })
 
-test('toasts once as the CPU is overloaded, and not again for 10 minutes', async ($, on) => {
+test('alerts once with a macOS notification as the CPU is overloaded, and not again for 10 minutes', async ($, on) => {
   const spike = ps([...Array.from({ length: 13 }, (_, i): [number, number, string] => [6000 + i, 24, POSTER]), [44001, 0, LAUNCHD_SIM], [91104, 60, CLAUDE]])
   const world = { ...calm(), iostat: iostat(100), sysctl: sysctl({ load: 40 }), ps: spike }
-  const { status, toasts, clock } = engine(on, world)
+  const { status, toasts, notifications, clock } = engine(on, world)
   await $.session.start(START)
   await clock.settle()
 
   expect(status.at(-1)).toBe('CPU ◆ 100% · Memory 56% · Simulator using 3 cores')
-  expect(toasts).toEqual(['Mac is overloaded: CPU at 100%, Simulator using 3 cores. Shut down simulators you are not using.'])
+  expect(notifications()).toEqual([
+    'display notification "CPU at 100%, Simulator using 3 cores. Shut down simulators you are not using." with title "Mac is overloaded"',
+  ])
+  expect(toasts).toEqual([])
 
   await clock.advance(30_000)
   world.iostat = iostat(30)
@@ -222,7 +230,7 @@ test('toasts once as the CPU is overloaded, and not again for 10 minutes', async
   world.iostat = iostat(100)
   world.sysctl = sysctl({ load: 40 })
   await clock.advance(30_000)
-  expect(toasts).toHaveLength(1)
+  expect(notifications()).toHaveLength(1)
 
   world.iostat = iostat(30)
   world.sysctl = sysctl({ load: 12 })
@@ -230,7 +238,7 @@ test('toasts once as the CPU is overloaded, and not again for 10 minutes', async
   world.iostat = iostat(100)
   world.sysctl = sysctl({ load: 40 })
   await clock.advance(30_000)
-  expect(toasts).toHaveLength(2)
+  expect(notifications()).toHaveLength(2)
 })
 
 test('takes macOS at its word on memory, and names the largest app', async ($, on) => {
@@ -242,12 +250,31 @@ test('takes macOS at its word on memory, and names the largest app', async ($, o
   expect(programs()).toContain('/usr/bin/top')
 })
 
-test('toasts when macOS says memory is critical', async ($, on) => {
-  const { toasts, clock } = engine(on, { ...calm(), sysctl: sysctl({ available: 6, pressure: 4 }) })
+test('alerts when macOS says memory is critical', async ($, on) => {
+  const { notifications, clock } = engine(on, { ...calm(), sysctl: sysctl({ available: 6, pressure: 4 }) })
   await $.session.start(START)
   await clock.settle()
 
-  expect(toasts).toEqual(['Mac is overloaded: memory nearly full, Claude using 1.2 GB.'])
+  expect(notifications()).toEqual(['display notification "Memory nearly full, Claude using 1.2 GB." with title "Mac is overloaded"'])
+})
+
+test('leaves the alert to the chat that saw the overload first', async ($, on) => {
+  // Another open chat posted it a minute ago.
+  const { notifications, stored, clock } = engine(on, { ...calm(), iostat: iostat(100), sysctl: sysctl({ load: 40 }) }, { alertedAt: NOW - 60_000 })
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(notifications()).toEqual([])
+  expect(stored.alertedAt).toBe(NOW - 60_000)
+})
+
+test('says it in a toast where no notification can be posted', async ($, on) => {
+  const { toasts, clock } = engine(on, { ...calm(), iostat: iostat(100), sysctl: sysctl({ load: 40 }), missing: ['/usr/bin/osascript'] })
+  await $.session.start(START)
+  await clock.settle()
+
+  // Claude's 0.6 cores are too small a share of a full Mac to blame, so no app is named.
+  expect(toasts).toEqual(['Mac is overloaded: CPU at 100%.'])
 })
 
 test('marks three booted simulators, without a toast', async ($, on) => {

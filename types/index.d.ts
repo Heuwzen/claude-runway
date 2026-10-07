@@ -51,8 +51,8 @@ declare module 'claude-code' {
       failures: number
       // Whether a reading has worked on this Mac, in this chat or an earlier one.
       hasWorked: boolean
-      // When this chat last toasted, so an overload that comes and goes toasts once.
-      toastedAt: number
+      // When this chat last alerted, so an overload that comes and goes alerts once.
+      alertedAt: number
     }
   }
 }

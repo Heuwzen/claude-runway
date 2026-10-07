@@ -12,7 +12,7 @@ CPU ◆ 100% · Memory 51% · Simulator using 6 cores
 - **Memory** is the share of memory macOS can't hand to apps right away, and its mark follows the memory pressure Activity Monitor shows.
 - **Sims** counts the booted simulators: iOS, watchOS, tvOS and visionOS, plus those Xcode boots for its previews. It's left out when none are booted, and when the line names an app instead, unless the simulators are the problem.
 - A `▲` marks whatever is strained, and a `◆` whatever is overloaded. The line then names the app using the most CPU, or the most memory when memory is the problem. An app is named for the CPU only when it holds at least a quarter of the busy cores.
-- A toast appears only when the Mac is overloaded, such as: "Mac is overloaded: CPU at 100%, Simulator using 6 cores. Shut down simulators you are not using." Each chat shows it at most once every 10 minutes.
+- When the Mac is overloaded, a macOS notification appears at the top right of the screen, such as "Mac is overloaded: CPU at 100%, Simulator using 6 cores. Shut down simulators you are not using." It's sent once per overload across all your open chats, and at most once every 10 minutes. If a notification can't be posted, the chat shows the alert as a pop-up instead.
 - `/mac-load` breaks the Mac down by app: the busiest apps and the largest, each booted simulator by name, the load over 1, 5 and 15 minutes, and swap use. It answers at once, even while a reply is still running.
 
 ## Levels
@@ -50,6 +50,8 @@ A reading runs three read-only commands. Each runs by its full path, with no she
 
 iostat and sysctl run in the C locale, so their numbers come with decimal points. ps runs in UTF-8, so app names such as "Café" come through whole. If iostat doesn't answer in time, the CPU is added up from the processes instead.
 
+When the Mac becomes overloaded, the first chat to see it posts the notification with `/usr/bin/osascript -e 'display notification …'`. The first time, macOS may ask whether to allow notifications from Script Editor, which posts them for osascript.
+
 While memory is strained, a reading also runs `/usr/bin/top -l 1 -o mem -stats pid,mem`. That reads every process's memory footprint, the figure Activity Monitor shows, so the largest app can be named. `/mac-load` always reads it.
 
 Processes are grouped into apps by where their programs live:
@@ -70,4 +72,4 @@ claude plugin validate .
 claude plugin test .
 ```
 
-The parsing, grouping, levels and text are in `hooks/format.ts`, with no engine calls, so they can be tested alone. `hooks/register.tsx` holds the polling, the shared reading, the toasts and the command.
+The parsing, grouping, levels and text are in `hooks/format.ts`, with no engine calls, so they can be tested alone. `hooks/register.tsx` holds the polling, the shared reading, the alerts and the command.

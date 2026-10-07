@@ -3,9 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { Levels, Reading } from '../types'
 import {
+  ALERT_COOLDOWN,
   FRESH_FOR,
   SYSCTL_NAMES,
-  TOAST_COOLDOWN,
+  alertOf,
+  appleScriptString,
   appsOf,
   cpuOf,
   detailsOf,
@@ -20,7 +22,6 @@ import {
   parseTop,
   simulatorsOf,
   statusOf,
-  toastOf,
   worstOf,
 } from './format'
 
@@ -31,17 +32,19 @@ const levelsAtom = atom({ plugin: 'mac-load', key: 'levels' } as const, CALM)
 const stoppedAtom = atom({ plugin: 'mac-load', key: 'isStopped' } as const, false)
 const failuresAtom = atom({ plugin: 'mac-load', key: 'failures' } as const, 0)
 const workedAtom = atom({ plugin: 'mac-load', key: 'hasWorked' } as const, false)
-const toastedAtAtom = atom({ plugin: 'mac-load', key: 'toastedAt' } as const, 0)
+const alertedAtAtom = atom({ plugin: 'mac-load', key: 'alertedAt' } as const, 0)
 
 const POLL_MS = 30_000
 // Room for a struggling Mac to answer: that is when a reading matters most.
 const TIMEOUT_MS = 10_000
 // Failed readings in a row after which the mod gives up, on a system it has never read.
 const MAX_FAILURES = 3
-// The store keys: set once a reading has worked on this Mac, for every later chat; and the
-// latest reading, which every open chat shows rather than each reading the Mac itself.
+// The store keys: set once a reading has worked on this Mac, for every later chat; the
+// latest reading, which every open chat shows rather than each reading the Mac itself;
+// and when any chat last alerted.
 const WORKED = 'worked'
 const SHARED = 'reading'
+const ALERTED = 'alertedAt'
 
 // Absolute paths, so no program of the same name earlier on the PATH runs instead; the C
 // locale, so numbers come with decimal points. ps alone runs in UTF-8, which keeps app
@@ -52,6 +55,7 @@ const PS = ['/bin/ps', '-A', '-o', 'pid=,ppid=,pcpu=,comm=']
 const SYSCTL = ['/usr/sbin/sysctl', ...SYSCTL_NAMES]
 const TOP = ['/usr/bin/top', '-l', '1', '-o', 'mem', '-stats', 'pid,mem']
 const SIMCTL = ['/usr/bin/xcrun', 'simctl', 'list', 'devices', 'booted', '--json']
+const OSASCRIPT = '/usr/bin/osascript'
 const C = { LC_ALL: 'C' }
 const UTF8 = { LC_ALL: 'en_US.UTF-8' }
 
@@ -151,6 +155,31 @@ async function markWorked($: EngineInterface) {
   }
 }
 
+// Posts an overload as a macOS notification, which arrives at the top right of the screen
+// as the person's other alerts do, rather than over the transcript. Once per overload
+// across every open chat: the first to see it claims it in the store. Where no
+// notification can be posted, the chat's own toast says it instead.
+async function alert($: EngineInterface, title: string, body: string, now: number) {
+  try {
+    const last = await $.store.get(ALERTED)
+
+    if (typeof last === 'number' && now - last < ALERT_COOLDOWN) {
+      return
+    }
+
+    await $.store.set(ALERTED, now)
+  } catch {
+    // Without the store, this chat's own cooldown still keeps it to one alert.
+  }
+
+  const script = `display notification ${appleScriptString(body)} with title ${appleScriptString(title)}`
+  const posted = await run($, [OSASCRIPT, '-e', script])
+
+  if (posted?.exitCode !== 0) {
+    $.ui.toast(`${title}: ${body}`, { timeoutMs: 10_000 })
+  }
+}
+
 // The reading another chat stored within FRESH_FOR, if any.
 async function sharedReading($: EngineInterface, now: number) {
   try {
@@ -203,11 +232,11 @@ async function take($: EngineInterface) {
   await update($, levelsAtom, () => levels)
   show($, statusOf(reading, levels, now))
 
-  const text = toastOf(reading, levels)
+  const overload = alertOf(reading, levels)
 
-  if (text !== undefined && worstOf(before) !== 'overloaded' && now - (await read($, toastedAtAtom)) >= TOAST_COOLDOWN) {
-    $.ui.toast(text, { timeoutMs: 10_000 })
-    await update($, toastedAtAtom, () => now)
+  if (overload !== undefined && worstOf(before) !== 'overloaded' && now - (await read($, alertedAtAtom)) >= ALERT_COOLDOWN) {
+    await update($, alertedAtAtom, () => now)
+    await alert($, overload.title, overload.body, now)
   }
 }
 

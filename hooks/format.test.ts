@@ -2,7 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import type { App, Levels, Reading } from '../types'
 import {
+  alertOf,
   appOf,
+  appleScriptString,
   appsOf,
   cpuLevelOf,
   culpritOf,
@@ -22,7 +24,6 @@ import {
   runtimeName,
   simulatorsOf,
   statusOf,
-  toastOf,
   worstOf,
 } from './format'
 
@@ -257,16 +258,28 @@ test('writes the status line: each strain marked, the culprit, and the age once 
   expect(statusOf(reading(), CALM, NOW + 2 * 3_600_000)).toBe('CPU 28% · Memory 56% · as of 2h ago')
 })
 
-test('toasts only an overload, with advice where it helps', async () => {
+test('alerts only an overload, with advice where it helps', async () => {
   const sims = reading({ cpu: 100, apps: [app('Simulator', 3.1)] })
-  expect(toastOf(sims, { ...CALM, cpu: 'busy' })).toBe(undefined)
-  expect(toastOf(sims, { ...CALM, cpu: 'overloaded' })).toBe('Mac is overloaded: CPU at 100%, Simulator using 3 cores. Shut down simulators you are not using.')
-  expect(toastOf(reading({ cpu: 97, apps: [app('Xcode', 9.4)] }), { ...CALM, cpu: 'overloaded' })).toBe(
-    'Mac is overloaded: CPU at 97%, Xcode using 9 cores. Run fewer builds at once.',
+  expect(alertOf(sims, { ...CALM, cpu: 'busy' })).toBe(undefined)
+  expect(alertOf(sims, { ...CALM, cpu: 'overloaded' })).toEqual({
+    title: 'Mac is overloaded',
+    body: 'CPU at 100%, Simulator using 3 cores. Shut down simulators you are not using.',
+  })
+  expect(alertOf(reading({ cpu: 97, apps: [app('Xcode', 9.4)] }), { ...CALM, cpu: 'overloaded' })?.body).toBe(
+    'CPU at 97%, Xcode using 9 cores. Run fewer builds at once.',
   )
-  expect(toastOf(reading({ cpu: 100, apps: [app('Claude', 0.4, 3 * 1024 ** 3)] }), { cpu: 'overloaded', memory: 'overloaded', simulators: 'normal' })).toBe(
-    'Mac is overloaded: CPU at 100% and memory nearly full, Claude using 3 GB.',
+  expect(alertOf(reading({ apps: [app('Claude', 0.4, 3 * 1024 ** 3)] }), { ...CALM, memory: 'overloaded' })?.body).toBe(
+    'Memory nearly full, Claude using 3 GB.',
   )
+  expect(alertOf(reading({ cpu: 100, apps: [app('Claude', 0.4, 3 * 1024 ** 3)] }), { cpu: 'overloaded', memory: 'overloaded', simulators: 'normal' })?.body).toBe(
+    'CPU at 100% and memory nearly full, Claude using 3 GB.',
+  )
+})
+
+test('quotes text for AppleScript, so no app name can end the string early', async () => {
+  expect(appleScriptString('CPU at 100%, Simulator using 3 cores.')).toBe('"CPU at 100%, Simulator using 3 cores."')
+  expect(appleScriptString('My "App" \\ v2')).toBe('"My \\"App\\" \\\\ v2"')
+  expect(appleScriptString('two\nlines')).toBe('"two lines"')
 })
 
 test('names simulator runtimes and reads the booted devices', async () => {

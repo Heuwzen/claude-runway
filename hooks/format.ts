@@ -18,8 +18,8 @@ export const CULPRIT_SHARE = 0.25
 export const STALE_AFTER = 75_000
 // A reading another chat took within this long is used as it is, rather than read again.
 export const FRESH_FOR = 25_000
-// One toast per overload: this chat says nothing again for this long.
-export const TOAST_COOLDOWN = 10 * 60_000
+// One alert per overload: after one, no chat alerts again for this long.
+export const ALERT_COOLDOWN = 10 * 60_000
 
 // What one `sysctl` reads: the cores, the memory, macOS's memory pressure, the load, the swap.
 export const SYSCTL_NAMES = [
@@ -399,9 +399,11 @@ const ADVICE: Record<string, string> = {
   Xcode: 'Run fewer builds at once.',
 }
 
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
 // What to say as the Mac becomes overloaded: what is strained, the app behind it, and
 // what would help. Nothing while it is not overloaded.
-export function toastOf(reading: Reading, levels: Levels) {
+export function alertOf(reading: Reading, levels: Levels) {
   const strains = [
     ...(levels.cpu === 'overloaded' ? [`CPU at ${Math.round(reading.cpu)}%`] : []),
     ...(levels.memory === 'overloaded' ? ['memory nearly full'] : []),
@@ -413,8 +415,15 @@ export function toastOf(reading: Reading, levels: Levels) {
 
   const culprit = culpritOf(reading, levels)
   const advice = culprit === undefined ? undefined : ADVICE[culprit.name]
+  const body = `${sentence(strains.join(' and '))}${culprit === undefined ? '' : `, ${culprit.text}`}.${advice === undefined ? '' : ` ${advice}`}`
 
-  return `Mac is overloaded: ${strains.join(' and ')}${culprit === undefined ? '' : `, ${culprit.text}`}.${advice === undefined ? '' : ` ${advice}`}`
+  return { title: 'Mac is overloaded', body }
+}
+
+// A string as AppleScript writes one: quoted, its backslashes and quotes escaped, and
+// any control character, a line break among them, made a space.
+export function appleScriptString(text: string) {
+  return `"${text.replace(/[\\"]/g, '\\$&').replace(/[\u0000-\u001f\u007f]/g, ' ')}"`
 }
 
 // "com.apple.CoreSimulator.SimRuntime.iOS-26-0" reads as "iOS 26.0".
