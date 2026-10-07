@@ -2,6 +2,10 @@
 
 A Claude Code mod that keeps your 5-hour and weekly usage limits on screen, as two slim meters right above the prompt.
 
+![The 5-hour and weekly meters above the prompt in the Claude desktop app](screenshot.png)
+
+In the terminal:
+
 ```
 5-hour ▲ 86%   → limit in ~22m · resets in 2h 46m     Weekly 75%                  resets in 6h 16m
 ━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━╸──────────      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸──────┼──
