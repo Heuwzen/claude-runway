@@ -1,0 +1,11 @@
+{
+  "name": "CommitNudge",
+  "version": "0.1.0",
+  "description": "A quiet reminder in the status line and a toast when uncommitted work piles up in the chat's project",
+  "author": { "name": "Heuwzen", "url": "https://github.com/Heuwzen" },
+  "homepage": "https://github.com/Heuwzen/claude-code-commit-nudge",
+  "repository": "https://github.com/Heuwzen/claude-code-commit-nudge",
+  "license": "MIT",
+  "keywords": ["git", "commit", "reminder", "mod"],
+  "types": "./types/index.d.ts"
+}
