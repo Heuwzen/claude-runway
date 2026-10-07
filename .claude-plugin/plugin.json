@@ -1,0 +1,11 @@
+{
+  "name": "rate-limits",
+  "version": "0.3.0",
+  "description": "Keeps your 5-hour and weekly rate limits on screen as live meters above the prompt, with a toast at 80% and 95%",
+  "author": { "name": "Heuwzen", "url": "https://github.com/Heuwzen" },
+  "homepage": "https://github.com/Heuwzen/claude-code-rate-limits",
+  "repository": "https://github.com/Heuwzen/claude-code-rate-limits",
+  "license": "MIT",
+  "keywords": ["rate limits", "usage", "mod"],
+  "types": "./types/index.d.ts"
+}
