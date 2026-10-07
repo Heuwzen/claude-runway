@@ -1,38 +1,37 @@
 # Runway
 
-The mod this collection is named after. It keeps your 5-hour and weekly usage limits, and how full the chat's context window is, on screen as slim meters right above the prompt, so you can see how much runway you have left.
+Your Claude limits and the chat's context window as live meters, right above the prompt.
 
-![Runway's meters above the prompt in the Claude desktop app](../screenshot.png)
+![Runway's three meters above the prompt in the Claude desktop app: the 5-hour limit, the weekly limit and the context window](../screenshot.png)
 
-In the terminal:
+## What it shows
+
+- **Your 5-hour and weekly limits.** Each meter is blue, turns amber with a ▲ at 80% and red with a ◆ at 95%, and you get a pop-up as it crosses each of those.
+- **Your pace.** A tick on each meter marks how much of the window has passed. When the bar runs past the tick, you're using the limit faster than it resets.
+- **A warning before you run out.** If you're on course to hit a limit before it resets, the meter says when: "→ limit in ~3h 48m".
+- **When each window resets**, counting down.
+- **How full the chat's context window is**, once a reply has reported it.
+
+In the terminal, the same meters are drawn in text:
 
 ```
 5-hour ▲ 86%   → limit in ~22m · resets in 2h 46m     Weekly 75%                  resets in 6h 16m
 ━━━━━━━━━━━━━━━━━━━━━━┿━━━━━━━━━━━━━━━╸──────────      ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╸──────┼──
 ```
 
-## What it shows
+## The same numbers in every chat
 
-- **Each limit window** as a meter: blue normally, amber with ▲ from 80%, red with ◆ from 95%.
-- **A tick on each meter** marking how far through the window you are. Fill past the tick means you are using the limit faster than it resets.
-- **A forecast** when you are on course to run out before the reset, such as "→ limit in ~22m".
-- **Reset countdowns**, and a toast when a window crosses 80% and again at 95%.
-- **How full this chat's context window is**, as a third meter, once a reply has reported it.
-- **Level meters at any width.** The meters always sit on one row, whatever the text above them does. In the desktop app each meter has one fact beside its number: when its window resets, or when you're on course to hit the limit. The terminal fits more where there's room, dropping the reading's age first, then the reset time, as the window narrows.
-- **The same numbers in every chat.** Each chat saves its newest reading, and every open chat picks up the newest one any chat has within seconds. A new chat shows it before its own first reply. The terminal also shows the reading's age ("as of 12m ago") where there's room.
-- **No stale numbers.** Claude Code only learns your limits from a reply, and limits count your use everywhere. So when no chat has had a reply for an hour, the band says "no recent reading" instead of numbers that may be wrong by now. A window that has reset since then shows when it reset.
+Claude Code learns your limits from Claude's replies, and Runway reads them there. Each chat saves its newest reading, and every open chat picks up the newest one within seconds, so switching chats never shows you older numbers. A new chat shows your limits before its first reply.
 
-It reads the rate-limit information Claude Code already receives with each reply. It makes no requests of its own, and nothing leaves your machine.
+Your limits also count what you use on claude.ai and in Claude's other apps, which Runway can't see. So once no chat has had a reply for an hour, it says "no recent reading" instead of showing numbers that might be wrong by now. A window that has reset in the meantime says when it reset.
 
-## Requirements
+## Fits any window
 
-- Claude Code 2.1.288 or later. Mods are an early-access feature, so a Claude Code update may break this mod; please open an issue if it does.
-- A Claude subscription (Pro or Max). Claude Code only receives rate-limit information on a subscription.
-- The meters show in the Claude desktop app's Code tab and in the terminal.
+The meters always line up, whatever the text above them does. In the desktop app, each meter has one fact beside its number: when it resets, or when you'll hit the limit. In the terminal, Runway fits in more where there's room, such as how old the reading is, and drops it again as the window narrows.
 
 ## Install
 
-Install it with the other mods in this repository: see the [main README](../README.md#install).
+Runway installs with the other mods in this repository. See the [main README](../README.md#install).
 
 ## Development
 
@@ -45,4 +44,4 @@ Once Claude Code has loaded the mod, `.claude-plugin/types/` holds the API types
 
 ## License
 
-MIT, see [LICENSE](../LICENSE).
+[MIT](../LICENSE)

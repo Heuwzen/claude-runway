@@ -1,49 +1,55 @@
 # CommitNudge
 
-A quiet reminder for Claude Code when uncommitted work piles up in the chat's project, so a crash or a bad command cannot cost you hours of work.
+A quiet reminder to commit. CommitNudge stays out of sight until uncommitted work piles up in your project, then speaks up, so a crash or a bad command can't cost you hours of work.
 
-It only nudges. It never commits, stages, stashes or runs any git command that writes.
+```
+my-app: 14 files, +420 −38 uncommitted · last commit 52 min ago
+```
+
+It only reminds. It never commits, stages, stashes or runs any git command that writes.
 
 ## What it shows
 
-- A status line under the prompt, only while it is nudging:
-  `NoteOS: 14 files, +420 −38 uncommitted · last commit 52 min ago`
-- A 10-second toast when a project enters level 1, and again when it rises to level 2:
-  `NoteOS: 14 uncommitted files (+420 lines) and no commit for 52 min.`
-- `/commit-nudge`: up to 15 changed paths with their git status codes (and how many more), the totals, and the last commit's time and subject.
+- **A line in the footer**, like the one above, only while there's work to commit.
+- **A pop-up** when it first nudges, and again if it nudges harder: "my-app: 14 uncommitted files (+420 lines) and no commit for 52 min."
+- **`/commit-nudge`:** the changed files with their git status, the totals, and your last commit's time and message.
 
-The toast is armed again when the tree becomes clean or a new commit lands.
+Once you commit, or the working tree is clean again, the nudges start over.
 
-## Levels
+## When it nudges
 
-| Level | When |
-|---|---|
-| 1 | The tree is dirty, the last commit is 30 minutes old or more (or there is none), and 150 or more lines changed or 8 or more files. |
-| 2 | The tree is dirty and the last commit is 90 minutes old or more, or 600 or more lines changed, or 25 or more files. |
+- **A nudge:** at least 8 changed files or 150 changed lines, and no commit for 30 minutes.
+- **A harder nudge:** 25 changed files or 600 changed lines, or no commit for 90 minutes while anything is uncommitted.
 
-Files count changed tracked files and untracked files. Lines are the added and removed lines of tracked files (`git diff --shortstat HEAD`); untracked files add no lines. In a repository with no commit yet, lines count as 0 and only files count, and a missing commit does not by itself raise level 2.
-
-## Requirements
-
-- Claude Code with mods (function hooks) enabled, in the terminal or the desktop Code tab.
-- `git` on the PATH. A chat whose folder is not in a git repository is left alone.
-
-## Install
-
-Install it with the other mods in this repository: see the [main README](../README.md#install).
+Files include new, untracked ones. Lines are the lines added and removed in tracked files.
 
 ## How it works
 
-The repository is the chat's working folder (`git rev-parse --show-toplevel`). After each turn and every 2 minutes, the mod runs three read-only commands, each with a 5-second timeout:
+CommitNudge reads the git repository of the chat's folder after each of Claude's replies and every 2 minutes, with three read-only commands:
 
-- `git status --porcelain=v1 -z --untracked-files=normal`
-- `git diff --shortstat HEAD`
-- `git log -1 --format=%ct%x09%s`
+- `git status` for the changed files
+- `git diff --shortstat HEAD` for the changed lines
+- `git log -1` for your last commit
 
-They run with `GIT_OPTIONAL_LOCKS=0`, so git does not even refresh the index, and `LC_ALL=C`, so the figures read the same in any language. If git is missing, slow or fails, the mod leaves the line as it was and tries again later.
+They run with `GIT_OPTIONAL_LOCKS=0`, so git doesn't even refresh its index, and with a 5-second timeout. A chat outside a git repository is left alone.
 
-The thresholds, levels and texts live in `hooks/format.ts`, with tests in `hooks/*.test.ts*`. Run them with `claude plugin test <folder>`.
+## Requirements
+
+Claude Code and git.
+
+## Install
+
+CommitNudge installs with the other mods in this repository. See the [main README](../README.md#install).
+
+## Development
+
+```bash
+claude plugin validate .
+claude plugin test .
+```
+
+The thresholds, levels and text live in `hooks/format.ts`.
 
 ## License
 
-MIT, see [LICENSE](../LICENSE).
+[MIT](../LICENSE)
