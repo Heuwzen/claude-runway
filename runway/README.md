@@ -1,8 +1,8 @@
-# Rate limits for Claude Code
+# Runway
 
-A Claude Code mod that keeps your 5-hour and weekly usage limits on screen, as two slim meters right above the prompt.
+The mod this collection is named after. It keeps your 5-hour and weekly usage limits, and how full the chat's context window is, on screen as slim meters right above the prompt, so you can see how much runway you have left.
 
-![The 5-hour and weekly meters above the prompt in the Claude desktop app](screenshot.png)
+![Runway's meters above the prompt in the Claude desktop app](../screenshot.png)
 
 In the terminal:
 
@@ -32,23 +32,7 @@ It reads the rate-limit information Claude Code already receives with each reply
 
 ## Install
 
-```bash
-git clone https://github.com/Heuwzen/claude-code-rate-limits ~/.claude/skills/rate-limits
-```
-
-New chats load it automatically. Update with `git -C ~/.claude/skills/rate-limits pull`, and uninstall by deleting the folder.
-
-In the desktop app, a chat that's already open keeps the copy of the mod it opened with. To have updates reach open chats too, add this to the `env` block of `~/.claude/settings.json`:
-
-```json
-"CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
-```
-
-To keep it somewhere else, add its folder to the `env` block of `~/.claude/settings.json` instead:
-
-```json
-"env": { "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/claude-code-rate-limits" }
-```
+Install it with the other mods in this repository: see the [main README](../README.md#install).
 
 ## Development
 
@@ -61,4 +45,4 @@ Once Claude Code has loaded the mod, `.claude-plugin/types/` holds the API types
 
 ## License
 
-MIT
+MIT, see [LICENSE](../LICENSE).

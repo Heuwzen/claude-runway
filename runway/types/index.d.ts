@@ -10,7 +10,7 @@ export type Reading = { limits: Limit[]; at: number }
 
 declare module 'claude-code' {
   interface PluginState {
-    'RateLimits': {
+    'Runway': {
       // This chat's context window; null until a reply reports it.
       context: Context | null
       // The windows of the reading on show.

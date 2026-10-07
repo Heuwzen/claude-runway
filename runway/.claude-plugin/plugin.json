@@ -1,11 +1,19 @@
 {
-  "name": "RateLimits",
-  "version": "0.4.0",
-  "description": "Keeps your 5-hour and weekly rate limits on screen as live meters above the prompt, with a toast at 80% and 95%",
-  "author": { "name": "Heuwzen", "url": "https://github.com/Heuwzen" },
-  "homepage": "https://github.com/Heuwzen/claude-code-rate-limits",
-  "repository": "https://github.com/Heuwzen/claude-code-rate-limits",
+  "name": "Runway",
+  "version": "0.5.0",
+  "description": "Your Claude Code 5-hour and weekly limits and the chat’s context window as live meters above the prompt",
+  "author": {
+    "name": "Heuwzen",
+    "url": "https://github.com/Heuwzen"
+  },
+  "homepage": "https://github.com/Heuwzen/claude-runway/tree/main/runway",
+  "repository": "https://github.com/Heuwzen/claude-runway",
   "license": "MIT",
-  "keywords": ["rate limits", "usage", "mod"],
+  "keywords": [
+    "rate limits",
+    "usage",
+    "context",
+    "mod"
+  ],
   "types": "./types/index.d.ts"
 }
