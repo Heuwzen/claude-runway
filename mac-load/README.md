@@ -34,9 +34,7 @@ On its own, a build that keeps every core busy counts as busy, not overloaded. O
 
 ## Install
 
-```
-git clone https://github.com/Heuwzen/claude-code-mac-load ~/.claude/skills/mac-load
-```
+Install it with the other mods in this repository: see the [main README](../README.md#install).
 
 ## How it works
 
@@ -73,3 +71,7 @@ claude plugin test .
 ```
 
 The parsing, grouping, levels and text are in `hooks/format.ts`, with no engine calls, so they can be tested alone. `hooks/register.tsx` holds the polling, the shared reading, the alerts and the command.
+
+## License
+
+MIT, see [LICENSE](../LICENSE).

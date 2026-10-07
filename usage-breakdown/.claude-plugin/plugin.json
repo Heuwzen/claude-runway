@@ -2,7 +2,18 @@
   "name": "UsageBreakdown",
   "version": "0.1.0",
   "description": "Shows what uses up your Claude limits: tokens by model, by main chat versus agents, and by project, across every chat on this Mac",
-  "author": { "name": "Heuwzen", "url": "https://github.com/Heuwzen" },
+  "author": {
+    "name": "Heuwzen",
+    "url": "https://github.com/Heuwzen"
+  },
+  "homepage": "https://github.com/Heuwzen/claude-runway/tree/main/usage-breakdown",
+  "repository": "https://github.com/Heuwzen/claude-runway",
   "license": "MIT",
+  "keywords": [
+    "tokens",
+    "usage",
+    "models",
+    "mod"
+  ],
   "types": "./types/index.d.ts"
 }

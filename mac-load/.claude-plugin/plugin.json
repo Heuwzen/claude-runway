@@ -6,8 +6,8 @@
     "name": "Heuwzen",
     "url": "https://github.com/Heuwzen"
   },
-  "homepage": "https://github.com/Heuwzen/claude-code-mac-load",
-  "repository": "https://github.com/Heuwzen/claude-code-mac-load",
+  "homepage": "https://github.com/Heuwzen/claude-runway/tree/main/mac-load",
+  "repository": "https://github.com/Heuwzen/claude-runway",
   "license": "MIT",
   "keywords": [
     "cpu",

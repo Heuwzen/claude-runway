@@ -30,9 +30,7 @@ Files count changed tracked files and untracked files. Lines are the added and r
 
 ## Install
 
-```sh
-git clone https://github.com/Heuwzen/claude-code-commit-nudge ~/.claude/skills/commit-nudge
-```
+Install it with the other mods in this repository: see the [main README](../README.md#install).
 
 ## How it works
 
@@ -48,4 +46,4 @@ The thresholds, levels and texts live in `hooks/format.ts`, with tests in `hooks
 
 ## License
 
-MIT
+MIT, see [LICENSE](../LICENSE).

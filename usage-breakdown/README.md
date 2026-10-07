@@ -12,9 +12,7 @@ A Claude Code build with function-hook mods (the desktop app's Code tab or the t
 
 ## Install
 
-```
-git clone https://github.com/Heuwzen/claude-code-usage-breakdown ~/.claude/skills/usage-breakdown
-```
+Install it with the other mods in this repository: see the [main README](../README.md#install).
 
 ## How it works
 
@@ -23,3 +21,7 @@ git clone https://github.com/Heuwzen/claude-code-usage-breakdown ~/.claude/skill
 - A chat's project is the folder name of its git repository (the main working tree, for a worktree), or of its working folder outside one.
 - The pane adds up every chat's saved counts, taking this chat's live. It refreshes when opened and every 60 seconds while open.
 - Counting starts when the mod is installed; earlier chats are not counted. A window includes every hour that overlaps it, so "Last 5 hours" covers a little over 5 hours.
+
+## License
+
+MIT, see [LICENSE](../LICENSE).
