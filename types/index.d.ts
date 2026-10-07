@@ -27,7 +27,7 @@ export type Report = { at: number; sections: Section[] }
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-breakdown': {
+    'UsageBreakdown': {
       // The chat the counts below belong to; '' before the first request.
       sessionId: string
       // The basename of the chat's git top level, or of its working folder.

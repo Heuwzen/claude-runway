@@ -281,7 +281,7 @@ test('shows the empty state before anything is counted', async ($, on) => {
   await $.command.run({ command: 'usage-breakdown', args: '' } as never)
 
   for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ plugin: 'usage-breakdown', surface, ...PANE })
+    const ui = await $.ui.mount({ plugin: 'UsageBreakdown', surface, ...PANE })
     expect(await ui.find({ type: 'Text', text: 'Nothing recorded yet: counting starts now.' })).toBeDefined()
     await ui.unmount()
   }
@@ -305,7 +305,7 @@ test('opens the pane and draws both windows, grouped three ways, on each surface
   expect(state.opened).toEqual(['usage-breakdown'])
 
   for (const surface of SURFACES) {
-    const ui = await $.ui.mount({ plugin: 'usage-breakdown', surface, ...PANE })
+    const ui = await $.ui.mount({ plugin: 'UsageBreakdown', surface, ...PANE })
 
     expect(await ui.find({ type: 'Text', text: 'Last 5 hours' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Last 7 days' })).toBeDefined()
@@ -334,7 +334,7 @@ test('shares are of input, cache write and output, without cache reads', async (
   await step($)
   await $.command.run({ command: 'usage-breakdown', args: '' } as never)
 
-  const ui = await $.ui.mount({ plugin: 'usage-breakdown', surface: 'terminal', ...PANE })
+  const ui = await $.ui.mount({ plugin: 'UsageBreakdown', surface: 'terminal', ...PANE })
   // Last 5 hours: this chat 160 tokens (100 + 10 + 50), the other 6,000 of Sonnet.
   expect(await ui.find({ type: 'Text', text: '6.2k tokens · 6 requests' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '97%' })).toBeDefined()
@@ -347,7 +347,7 @@ test('sizes the bars to the pane width', async ($, on) => {
   await $.command.run({ command: 'usage-breakdown', args: '' } as never)
   const longest = async (columns: number) => {
     const ui = await $.ui.mount({
-      plugin: 'usage-breakdown',
+      plugin: 'UsageBreakdown',
       surface: 'terminal',
       ...PANE,
       props: { ...PANE.props, bodyColumns: columns },
@@ -367,20 +367,20 @@ test('refreshes every 60 seconds while the pane is open, not before', async ($, 
   await $.session.start(START)
   await $.command.run({ command: 'usage-breakdown', args: '' } as never)
 
-  const ui = await $.ui.mount({ plugin: 'usage-breakdown', surface: 'desktop', ...PANE })
+  const ui = await $.ui.mount({ plugin: 'UsageBreakdown', surface: 'desktop', ...PANE })
   expect(await ui.find({ type: 'Text', text: 'Nothing recorded yet: counting starts now.' })).toBeDefined()
   await ui.unmount()
 
   stored['session:chat-9'] = other
   await clock.advance(30_000)
 
-  const early = await $.ui.mount({ plugin: 'usage-breakdown', surface: 'desktop', ...PANE })
+  const early = await $.ui.mount({ plugin: 'UsageBreakdown', surface: 'desktop', ...PANE })
   expect(await early.find({ type: 'Text', text: 'Nothing recorded yet: counting starts now.' })).toBeDefined()
   await early.unmount()
 
   await clock.advance(31_000)
 
-  const later = await $.ui.mount({ plugin: 'usage-breakdown', surface: 'desktop', ...PANE })
+  const later = await $.ui.mount({ plugin: 'UsageBreakdown', surface: 'desktop', ...PANE })
   expect(await later.find({ type: 'Text', text: 'Last 5 hours' })).toBeDefined()
   await later.unmount()
 })

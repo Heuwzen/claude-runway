@@ -22,14 +22,14 @@ import {
 } from './format'
 import type { Layout, Source } from './format'
 
-const sessionIdAtom = atom({ plugin: 'usage-breakdown', key: 'sessionId' } as const, '')
-const projectAtom = atom({ plugin: 'usage-breakdown', key: 'project' } as const, '')
-const hoursAtom = atom({ plugin: 'usage-breakdown', key: 'hours' } as const, {})
-const changesAtom = atom({ plugin: 'usage-breakdown', key: 'changes' } as const, 0)
-const savedAtom = atom({ plugin: 'usage-breakdown', key: 'saved' } as const, 0)
-const savedAtAtom = atom({ plugin: 'usage-breakdown', key: 'savedAt' } as const, 0)
-const sweptAtAtom = atom({ plugin: 'usage-breakdown', key: 'sweptAt' } as const, 0)
-const reportAtom = atom({ plugin: 'usage-breakdown', key: 'report' } as const, { at: 0, sections: [] })
+const sessionIdAtom = atom({ plugin: 'UsageBreakdown', key: 'sessionId' } as const, '')
+const projectAtom = atom({ plugin: 'UsageBreakdown', key: 'project' } as const, '')
+const hoursAtom = atom({ plugin: 'UsageBreakdown', key: 'hours' } as const, {})
+const changesAtom = atom({ plugin: 'UsageBreakdown', key: 'changes' } as const, 0)
+const savedAtom = atom({ plugin: 'UsageBreakdown', key: 'saved' } as const, 0)
+const savedAtAtom = atom({ plugin: 'UsageBreakdown', key: 'savedAt' } as const, 0)
+const sweptAtAtom = atom({ plugin: 'UsageBreakdown', key: 'sweptAt' } as const, 0)
+const reportAtom = atom({ plugin: 'UsageBreakdown', key: 'report' } as const, { at: 0, sections: [] })
 
 const PANE = 'usage-breakdown'
 const SWEEP_EVERY_MS = 3_600_000

@@ -1,4 +1,4 @@
-# usage-breakdown
+# UsageBreakdown
 
 A Claude Code mod that shows what is using up your Claude limits: tokens by model, by main chat versus agents, and by project, across every chat on this Mac.
 
