@@ -1,4 +1,4 @@
-import type { Limit, Reading } from '../types'
+import type { Context, Limit, Reading } from '../types'
 
 const HOUR = 3_600_000
 
@@ -147,6 +147,69 @@ export function viewOf(limit: Limit, now: number, readingAt: number): LimitView 
     age,
     hasReset: false,
   }
+}
+
+export type Tone = 'plain' | 'dim' | 'warning'
+
+// A run of the line beside a figure, and how it is inked.
+export type Segment = { text: string; tone: Tone }
+
+const dim = (text: string): Segment => ({ text, tone: 'dim' })
+const plain = (text: string): Segment => ({ text, tone: 'plain' })
+
+// A lead, then notes after it, dimmed and set off by dots.
+function withNotes(lead: Segment[], notes: readonly string[]): Segment[] {
+  if (notes.length === 0) {
+    return lead
+  }
+
+  const text = notes.join(' · ')
+
+  return [...lead, dim(lead.length > 0 ? ` · ${text}` : text)]
+}
+
+// The line beside a window's figure, fullest first. The band shows the first that
+// fits, so a narrow tile drops the reading's age, then the reset, never wrapping.
+export function detailsOf(view: LimitView): Segment[][] {
+  if (view.hasReset) {
+    return [[dim('reset since last reading')], [dim('reset')]]
+  }
+
+  const resets = view.resets === undefined ? [] : [`resets in ${view.resets}`]
+  const notes = view.age === undefined ? resets : [`as of ${view.age} ago`, ...resets]
+
+  if (view.percent >= 100) {
+    // The figure already says the limit is reached; when it comes back matters more.
+    const reached = [plain('Limit reached')]
+
+    return [withNotes(reached, notes), withNotes(reached, resets), withNotes([], resets)]
+  }
+
+  if (view.forecastMs !== undefined) {
+    const forecast = formatDuration(view.forecastMs)
+    // An arrow, not a second ▲: a projection, beside the figure's own warning.
+    const arrow: Segment = { text: '→ ', tone: 'warning' }
+    const lead = [arrow, plain(`limit in ~${forecast}`)]
+
+    return [withNotes(lead, notes), lead, [arrow, plain(`~${forecast}`)]]
+  }
+
+  return [withNotes([], notes), withNotes([], resets)]
+}
+
+// The line beside the context figure, fullest first.
+export function contextDetailsOf(context: Context): Segment[][] {
+  const tokens = compactTokens(context.tokens)
+
+  return [[dim(`${tokens} of ${compactTokens(context.window)}`)], [dim(tokens)]]
+}
+
+export const widthOf = (segments: readonly Segment[]) =>
+  segments.reduce((width, segment) => width + segment.text.length, 0)
+
+// The fullest of `candidates` that takes at most `room` cells; none when even the sparest is wider.
+export function fitting(candidates: readonly Segment[][], room: number): Segment[] {
+  return candidates.find(segments => widthOf(segments) <= room) ?? []
 }
 
 // Whether a value read back from the store is a reading this mod saved.

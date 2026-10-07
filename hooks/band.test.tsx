@@ -24,8 +24,8 @@ const SURFACES = ['terminal', 'desktop'] as const
 const START = { cwd: '/tmp', surface: 'desktop', isInteractive: true } as const
 
 // Stands in for the engine beneath the plugin: its clock, its store (holding `stored`),
-// its session events and its toasts, collected in `toasts`.
-function engine(on: On, stored: Record<string, unknown> = {}) {
+// its session events (`context` as the chat's usage) and its toasts, collected in `toasts`.
+function engine(on: On, stored: Record<string, unknown> = {}, context: { window: number; tokens?: number; percent?: number } = { window: 200_000 }) {
   const toasts: string[] = []
   mock.clock(on, { now: NOW })
   on('store.get', (_, e) => ({ value: stored[e.key] }))
@@ -36,7 +36,7 @@ function engine(on: On, stored: Record<string, unknown> = {}) {
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context, rateLimits: [] } }))
   on('ui.toast', (_, e) => {
     toasts.push(e.text)
 
@@ -156,6 +156,21 @@ test("adds this chat's context fill as a third meter once a reply reports it", a
       expect(await ui.findAll({ type: 'Svg' })).toHaveLength(3)
     }
 
+    await ui.unmount()
+  }
+})
+
+test('keeps every tile to one line beside three meters, shedding the age first', async ($, on) => {
+  engine(on, { latest: { limits: LIMITS, at: NOW - 2 * 60_000 } }, { window: 1_000_000, tokens: 735_000, percent: 74 })
+  await $.session.start(START)
+
+  for (const surface of SURFACES) {
+    // About the width of the desktop band in the bug report: tiles 29 cells across.
+    const ui = await $.ui.mount({ plugin: 'rate-limits', surface, ...BAND, props: { ...BAND.props, bodyColumns: 95 } })
+    expect(await ui.find({ type: 'Text', text: 'resets in 1h' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'resets in 3d' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /as of/ })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: '735k of 1M' })).toBeDefined()
     await ui.unmount()
   }
 })

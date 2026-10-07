@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { Context, Limit } from '../types'
-import { compactTokens, formatDuration, isReading, labelOf, severityOf, thresholdOf, viewOf } from './format'
-import type { LimitView, Severity } from './format'
+import { contextDetailsOf, detailsOf, fitting, isReading, labelOf, severityOf, thresholdOf, viewOf } from './format'
+import type { LimitView, Segment, Severity, Tone } from './format'
 import { METER_HEIGHT, meterRuns, meterSvg } from './meter'
 import type { MeterRole } from './meter'
 
@@ -62,6 +62,8 @@ function runStyle(role: MeterRole, color: string) {
   }
 }
 
+const markOf = (severity: Severity) => (severity === 'critical' ? '◆ ' : '▲ ')
+
 type FigureProps = { elements: Elements; label: string; percent: number }
 
 function Figure({ elements, label, percent }: FigureProps) {
@@ -71,8 +73,60 @@ function Figure({ elements, label, percent }: FigureProps) {
   return (
     <Box flexShrink={0}>
       <Text>{`${label} `}</Text>
-      {severity !== 'normal' && <Text color={COLORS[severity]}>{severity === 'critical' ? '◆ ' : '▲ '}</Text>}
+      {severity !== 'normal' && <Text color={COLORS[severity]}>{markOf(severity)}</Text>}
       <Text bold>{`${Math.round(percent)}%`}</Text>
+    </Box>
+  )
+}
+
+// The cells a tile `width` across has left beside its figure, after the gap between them.
+function roomBeside(label: string, percent: number, width: number) {
+  const severity = severityOf(percent)
+  const figure = `${label} ${severity === 'normal' ? '' : markOf(severity)}${Math.round(percent)}%`
+
+  return width - figure.length - 1
+}
+
+function toneStyle(tone: Tone) {
+  switch (tone) {
+    case 'plain':
+      return {}
+    case 'dim':
+      return { dimColor: true }
+    case 'warning':
+      return { color: COLORS.warning }
+  }
+}
+
+type DetailProps = { elements: Elements; segments: readonly Segment[] }
+
+// Measured to fit rather than left to wrap: a second line would knock this tile's
+// meter out of line with its neighbours'. The truncation is a backstop for wide fonts.
+function Detail({ elements, segments }: DetailProps) {
+  const { Box, Text } = elements
+
+  return (
+    <Box flexShrink={1} minWidth={0}>
+      <Text wrap="truncate-end">
+        {segments.map(segment => (
+          <Text {...toneStyle(segment.tone)}>{segment.text}</Text>
+        ))}
+      </Text>
+    </Box>
+  )
+}
+
+type HeaderProps = { elements: Elements; label: string; percent: number; candidates: readonly Segment[][]; width: number }
+
+// The figure, and the fullest detail that fits beside it on one line.
+function Header({ elements, label, percent, candidates, width }: HeaderProps) {
+  const { Box } = elements
+  const segments = fitting(candidates, roomBeside(label, percent, width))
+
+  return (
+    <Box justifyContent="space-between" alignItems="flex-start" columnGap={1}>
+      <Figure elements={elements} label={label} percent={percent} />
+      {segments.length > 0 && <Detail elements={elements} segments={segments} />}
     </Box>
   )
 }
@@ -80,37 +134,13 @@ function Figure({ elements, label, percent }: FigureProps) {
 type TileProps = { elements: Elements; limit: Limit; view: LimitView; width: number; meter: Meter }
 
 function Tile({ elements, limit, view, width, meter }: TileProps) {
-  const { Box, Text } = elements
+  const { Box } = elements
   const color = COLORS[severityOf(view.percent)]
-  // One line beside the figure, the most urgent part first.
-  const detail: RenderElement[] = []
-
-  if (view.hasReset) {
-    detail.push(<Text dimColor>reset since last reading</Text>)
-  } else {
-    if (view.percent >= 100) {
-      detail.push(<Text>Limit reached</Text>)
-    } else if (view.forecastMs !== undefined) {
-      detail.push(
-        // An arrow, not a second ▲: a projection, beside the figure's own warning.
-        <Text color={COLORS.warning}>{'→ '}</Text>,
-        <Text>{`limit in ~${formatDuration(view.forecastMs)}`}</Text>,
-      )
-    }
-
-    const notes = [view.age && `as of ${view.age} ago`, view.resets && `resets in ${view.resets}`].filter(Boolean)
-
-    if (notes.length > 0) {
-      detail.push(<Text dimColor>{`${detail.length > 0 ? ' · ' : ''}${notes.join(' · ')}`}</Text>)
-    }
-  }
 
   return (
-    <Box flexDirection="column" width={width}>
-      <Box justifyContent="space-between" columnGap={1}>
-        <Figure elements={elements} label={labelOf(limit.kind)} percent={view.percent} />
-        {detail.length > 0 && <Text wrap="truncate-end">{detail}</Text>}
-      </Box>
+    // The meter keeps to the tile's foot, level with its neighbours' whatever sits above.
+    <Box flexDirection="column" justifyContent="space-between" width={width}>
+      <Header elements={elements} label={labelOf(limit.kind)} percent={view.percent} candidates={detailsOf(view)} width={width} />
       {meter(view, width, color, altOf(limit, view))}
     </Box>
   )
@@ -119,17 +149,12 @@ function Tile({ elements, limit, view, width, meter }: TileProps) {
 type ContextTileProps = { elements: Elements; context: Context; width: number; meter: Meter }
 
 function ContextTile({ elements, context, width, meter }: ContextTileProps) {
-  const { Box, Text } = elements
+  const { Box } = elements
   const color = COLORS[severityOf(context.percent)]
 
   return (
-    <Box flexDirection="column" width={width}>
-      <Box justifyContent="space-between" columnGap={1}>
-        <Figure elements={elements} label="Context" percent={context.percent} />
-        <Text dimColor wrap="truncate-end">
-          {`${compactTokens(context.tokens)} of ${compactTokens(context.window)}`}
-        </Text>
-      </Box>
+    <Box flexDirection="column" justifyContent="space-between" width={width}>
+      <Header elements={elements} label="Context" percent={context.percent} candidates={contextDetailsOf(context)} width={width} />
       {meter({ percent: context.percent, hasReset: false }, width, color, `Context window, ${Math.round(context.percent)}% full`)}
     </Box>
   )
@@ -159,7 +184,7 @@ function Band({ elements, limits, context, now, readingAt, columns, meter }: Ban
   const { direction, tile } = layoutOf(columns, limits.length + (context ? 1 : 0))
 
   return (
-    <Box flexDirection={direction} columnGap={GAP}>
+    <Box flexDirection={direction} alignItems="stretch" columnGap={GAP}>
       {limits.map(limit => (
         <Tile elements={elements} limit={limit} view={viewOf(limit, now, readingAt)} width={tile} meter={meter} />
       ))}

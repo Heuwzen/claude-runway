@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { compactTokens, isReading, labelOf, paceOf, thresholdOf, timeUntil, viewOf } from './format'
+import { compactTokens, contextDetailsOf, detailsOf, fitting, isReading, labelOf, paceOf, thresholdOf, timeUntil, viewOf } from './format'
+import type { Segment } from './format'
 import { meterRuns, meterSvg } from './meter'
 
 const NOW = Date.parse('2026-10-07T12:00:00Z')
@@ -98,4 +99,30 @@ test('only well-formed saved readings are used', async () => {
 
 test('writes token counts the way people say them', async () => {
   expect([950, 82_000, 82_499, 1_000_000, 1_240_000].map(compactTokens)).toEqual(['950', '82k', '82k', '1M', '1.2M'])
+})
+
+const textOf = (segments: readonly Segment[]) => segments.map(segment => segment.text).join('')
+
+test('a detail sheds the reading\'s age, then the reset, to fit beside its figure', async () => {
+  const stale = detailsOf({ percent: 47, elapsed: 0.8, resets: '1h 7m', age: '2m', hasReset: false })
+  expect(stale.map(textOf)).toEqual(['as of 2m ago · resets in 1h 7m', 'resets in 1h 7m'])
+  expect(textOf(fitting(stale, 40))).toBe('as of 2m ago · resets in 1h 7m')
+  expect(textOf(fitting(stale, 18))).toBe('resets in 1h 7m')
+  expect(fitting(stale, 10)).toEqual([])
+})
+
+test('a forecast keeps its warning longest, down to the bare time', async () => {
+  const details = detailsOf({ percent: 85, elapsed: 0.6, forecastMs: 1016 * 60_000, resets: '3d', hasReset: false })
+  expect(details.map(textOf)).toEqual(['→ limit in ~16h 56m · resets in 3d', '→ limit in ~16h 56m', '→ ~16h 56m'])
+  expect(fitting(details, 12).map(segment => segment.tone)).toEqual(['warning', 'plain'])
+})
+
+test('a reached limit says when it comes back before anything else goes', async () => {
+  const details = detailsOf({ percent: 100, resets: '42m', age: '5m', hasReset: false })
+  expect(details.map(textOf)).toEqual(['Limit reached · as of 5m ago · resets in 42m', 'Limit reached · resets in 42m', 'resets in 42m'])
+  expect(detailsOf({ percent: 0, age: '3h', hasReset: true }).map(textOf)).toEqual(['reset since last reading', 'reset'])
+})
+
+test('the context detail falls back to the token count alone', async () => {
+  expect(contextDetailsOf({ percent: 74, tokens: 735_000, window: 1_000_000 }).map(textOf)).toEqual(['735k of 1M', '735k'])
 })
