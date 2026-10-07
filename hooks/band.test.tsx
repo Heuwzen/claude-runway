@@ -24,10 +24,16 @@ const SURFACES = ['terminal', 'desktop'] as const
 const START = { cwd: '/tmp', surface: 'desktop', isInteractive: true } as const
 
 // Stands in for the engine beneath the plugin: its clock, its store (holding `stored`),
-// its session events (`context` as the chat's usage) and its toasts, collected in `toasts`.
-function engine(on: On, stored: Record<string, unknown> = {}, context: { window: number; tokens?: number; percent?: number } = { window: 200_000 }) {
+// its session events (`context` and `rateLimits` as the chat's usage at its start) and its
+// toasts, collected in `toasts`.
+function engine(
+  on: On,
+  stored: Record<string, unknown> = {},
+  context: { window: number; tokens?: number; percent?: number } = { window: 200_000 },
+  rateLimits: typeof LIMITS = [],
+) {
   const toasts: string[] = []
-  mock.clock(on, { now: NOW })
+  const clock = mock.clock(on, { now: NOW })
   on('store.get', (_, e) => ({ value: stored[e.key] }))
   on('store.set', (_, e) => {
     stored[e.key] = e.value
@@ -36,14 +42,14 @@ function engine(on: On, stored: Record<string, unknown> = {}, context: { window:
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
-  on('session.usage', () => ({ value: { startedAt: 0, context, rateLimits: [] } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context, rateLimits } }))
   on('ui.toast', (_, e) => {
     toasts.push(e.text)
 
     return { value: undefined }
   })
 
-  return toasts
+  return { toasts, clock }
 }
 
 test('waits for the first reply before drawing meters', async ($, on) => {
@@ -98,7 +104,7 @@ test('stacks the meters when the band is narrow, and lines them up in one row wh
 })
 
 test('toasts once as a window crosses 80%, and again at 95%', async ($, on) => {
-  const toasts = engine(on)
+  const { toasts } = engine(on)
 
   for (const percentUsed of [79, 81, 88, 96, 97]) {
     await $.session.measure({
@@ -124,14 +130,63 @@ test('starts from the newest saved reading, before the first reply', async ($, o
   }
 })
 
-test('shows a window that reset since the saved reading as reset', async ($, on) => {
+test('shows a window that reset since an old reading as reset, without a number', async ($, on) => {
   const reading = { limits: [{ kind: 'five_hour', percentUsed: 97, resetsAt: '2026-10-07T11:30:00Z' }], at: NOW - 3 * 3_600_000 }
   engine(on, { latest: reading })
   await $.session.start(START)
 
   const ui = await $.ui.mount({ plugin: 'RateLimits', surface: 'desktop', ...BAND })
-  expect(await ui.find({ type: 'Text', text: '0%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'reset 30m ago' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /%/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('says there is no recent reading once the newest is 15 minutes old, rather than show numbers', async ($, on) => {
+  engine(on, { latest: { limits: LIMITS, at: NOW - 15 * 60_000 } }, { window: 1_000_000, tokens: 501_000, percent: 50 })
+  await $.session.start(START)
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ plugin: 'RateLimits', surface, ...BAND })
+    expect(await ui.findAll({ type: 'Text', text: 'no recent reading' })).toHaveLength(2)
+    expect(await ui.find({ type: 'Text', text: /62%|85%/ })).toBeUndefined()
+    // The chat's own context is live, so it keeps its number and its meter.
+    expect(await ui.find({ type: 'Text', text: '50%' })).toBeDefined()
+
+    if (surface === 'desktop') {
+      expect(await ui.findAll({ type: 'Svg' })).toHaveLength(1)
+    }
+
+    await ui.unmount()
+  }
+
+  // Where a terminal has the room, it says what brings a new reading.
+  const wide = await $.ui.mount({ plugin: 'RateLimits', surface: 'terminal', ...BAND, props: { ...BAND.props, bodyColumns: 160 } })
+  expect(await wide.findAll({ type: 'Text', text: 'no recent reading · a reply updates it' })).toHaveLength(2)
+  await wide.unmount()
+})
+
+test('takes up a newer reading another chat saved within seconds', async ($, on) => {
+  const stored: Record<string, unknown> = { latest: { limits: LIMITS, at: NOW - 60_000 } }
+  const { clock } = engine(on, stored)
+  await $.session.start(START)
+
+  stored.latest = { limits: [{ kind: 'five_hour', percentUsed: 70, resetsAt: '2026-10-07T13:00:00Z' }], at: NOW + 1_000 }
+  await clock.advance(5_000)
+
+  const ui = await $.ui.mount({ plugin: 'RateLimits', surface: 'desktop', ...BAND })
+  expect(await ui.find({ type: 'Text', text: '70%' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('never passes the limits a chat holds at its start off as a new reading', async ($, on) => {
+  const stored: Record<string, unknown> = {}
+  engine(on, stored, { window: 200_000 }, LIMITS)
+  await $.session.start(START)
+
+  expect(stored.latest).toBe(undefined)
+  const ui = await $.ui.mount({ plugin: 'RateLimits', surface: 'desktop', ...BAND })
+  expect(await ui.find({ type: 'Text', text: 'after the first reply' })).toBeDefined()
   await ui.unmount()
 })
 

@@ -113,6 +113,9 @@ export function compactTokens(count: number) {
 
 // A reading older than this is shown with its age, and without a forecast.
 export const STALE_AFTER = 2 * 60_000
+// A reading older than this is not shown as numbers at all: limits count use anywhere,
+// and only a reply brings new ones, so by now they may well be wrong.
+export const OLD_AFTER = 15 * 60_000
 
 export type LimitView = {
   // What the figure and the meter show: 0 once the window has reset since the reading.
@@ -204,8 +207,15 @@ export function detailsOf(view: LimitView): Segment[][] {
 // The desktop counts its width in cells of its code font, and its text runs wider, so
 // there each figure gets a single fact beside it, short enough for any tile: the
 // forecast, the reset or the reached limit's return, never a second fact after a dot.
-export function briefDetailsOf(view: LimitView): Segment[][] {
-  return detailsOf(view).filter(segments => !segments.some(segment => segment.text.includes(' · ')))
+export const brief = (candidates: readonly Segment[][]) =>
+  candidates.filter(segments => !segments.some(segment => segment.text.includes(' · ')))
+
+export const briefDetailsOf = (view: LimitView) => brief(detailsOf(view))
+
+// The line beside a window whose reading is too old to show: when it reset, which stays
+// true however old the reading, else that there is nothing recent; fullest first.
+export function oldDetailsOf(view: LimitView): Segment[][] {
+  return view.hasReset ? detailsOf(view) : [[dim('no recent reading · a reply updates it')], [dim('no recent reading')]]
 }
 
 // The line beside the context figure, fullest first.

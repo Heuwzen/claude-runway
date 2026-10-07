@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { Context, Limit } from '../types'
-import { briefDetailsOf, contextDetailsOf, detailsOf, fitting, isReading, labelOf, severityOf, thresholdOf, viewOf } from './format'
+import { OLD_AFTER, brief, contextDetailsOf, detailsOf, fitting, isReading, labelOf, oldDetailsOf, severityOf, thresholdOf, viewOf } from './format'
 import type { LimitView, Segment, Severity, Tone } from './format'
 import { METER_HEIGHT, meterRuns, meterSvg } from './meter'
 import type { MeterRole } from './meter'
@@ -34,7 +34,6 @@ const PX_PER_CELL = 9
 
 type Elements = Pick<ElementTable<'terminal'>, 'Box' | 'Text'>
 type Meter = (view: LimitView, width: number, color: string, alt: string) => RenderElement
-type Details = (view: LimitView) => Segment[][]
 
 function layoutOf(columns: number, count: number) {
   const fit = Math.floor((columns - GAP * (count - 1)) / count)
@@ -65,10 +64,20 @@ function runStyle(role: MeterRole, color: string) {
 
 const markOf = (severity: Severity) => (severity === 'critical' ? '◆ ' : '▲ ')
 
-type FigureProps = { elements: Elements; label: string; percent: number }
+// A label and its percentage; the label alone where the reading is too old to show.
+type FigureProps = { elements: Elements; label: string; percent?: number | undefined }
 
 function Figure({ elements, label, percent }: FigureProps) {
   const { Box, Text } = elements
+
+  if (percent === undefined) {
+    return (
+      <Box flexShrink={0}>
+        <Text>{label}</Text>
+      </Box>
+    )
+  }
+
   const severity = severityOf(percent)
 
   return (
@@ -81,9 +90,9 @@ function Figure({ elements, label, percent }: FigureProps) {
 }
 
 // The cells a tile `width` across has left beside its figure, after the gap between them.
-function roomBeside(label: string, percent: number, width: number) {
-  const severity = severityOf(percent)
-  const figure = `${label} ${severity === 'normal' ? '' : markOf(severity)}${Math.round(percent)}%`
+function roomBeside(label: string, percent: number | undefined, width: number) {
+  const severity = percent === undefined ? 'normal' : severityOf(percent)
+  const figure = percent === undefined ? label : `${label} ${severity === 'normal' ? '' : markOf(severity)}${Math.round(percent)}%`
 
   return width - figure.length - 1
 }
@@ -124,7 +133,13 @@ function Detail({ elements, segments }: DetailProps) {
   )
 }
 
-type HeaderProps = { elements: Elements; label: string; percent: number; candidates: readonly Segment[][]; width: number }
+type HeaderProps = {
+  elements: Elements
+  label: string
+  percent?: number | undefined
+  candidates: readonly Segment[][]
+  width: number
+}
 
 // The figure, and the fullest detail that fits beside it on one line.
 function Header({ elements, label, percent, candidates, width }: HeaderProps) {
@@ -139,13 +154,22 @@ function Header({ elements, label, percent, candidates, width }: HeaderProps) {
   )
 }
 
-type Column = { header: RenderElement; meter: RenderElement }
+// A tile's two parts: its figure and detail, and its meter, which a reading too old to
+// show goes without.
+type Column = { header: RenderElement; meter?: RenderElement }
 
-function limitColumn(elements: Elements, limit: Limit, view: LimitView, width: number, details: Details, meter: Meter): Column {
+type Shape = { width: number; isBrief: boolean; isOld: boolean; meter: Meter }
+
+function limitColumn(elements: Elements, limit: Limit, view: LimitView, { width, isBrief, isOld, meter }: Shape): Column {
   const label = labelOf(limit.kind)
+  const pick = (candidates: readonly Segment[][]) => (isBrief ? brief(candidates) : candidates)
+
+  if (isOld) {
+    return { header: <Header elements={elements} label={label} candidates={pick(oldDetailsOf(view))} width={width} /> }
+  }
 
   return {
-    header: <Header elements={elements} label={label} percent={view.percent} candidates={details(view)} width={width} />,
+    header: <Header elements={elements} label={label} percent={view.percent} candidates={pick(detailsOf(view))} width={width} />,
     meter: meter(view, width, COLORS[severityOf(view.percent)], altOf(limit, view)),
   }
 }
@@ -169,11 +193,11 @@ type BandProps = {
   now: number
   readingAt: number
   columns: number
-  details: Details
+  isBrief: boolean
   meter: Meter
 }
 
-function Band({ elements, limits, context, now, readingAt, columns, details, meter }: BandProps) {
+function Band({ elements, limits, context, now, readingAt, columns, isBrief, meter }: BandProps) {
   const { Box, Text } = elements
 
   if (limits.length === 0 && !context) {
@@ -185,8 +209,10 @@ function Band({ elements, limits, context, now, readingAt, columns, details, met
   }
 
   const { direction, tile } = layoutOf(columns, limits.length + (context ? 1 : 0))
+  // The newest reading any chat has: too old, and its numbers are left out rather than shown wrong.
+  const shape = { width: tile, isBrief, isOld: now - readingAt >= OLD_AFTER, meter }
   const all = [
-    ...limits.map(limit => limitColumn(elements, limit, viewOf(limit, now, readingAt), tile, details, meter)),
+    ...limits.map(limit => limitColumn(elements, limit, viewOf(limit, now, readingAt), shape)),
     ...(context ? [contextColumn(elements, context, tile, meter)] : []),
   ]
 
@@ -196,7 +222,7 @@ function Band({ elements, limits, context, now, readingAt, columns, details, met
         {all.map(column => (
           <Box flexDirection="column" width={tile}>
             {column.header}
-            {column.meter}
+            {column.meter !== undefined && column.meter}
           </Box>
         ))}
       </Box>
@@ -217,7 +243,7 @@ function Band({ elements, limits, context, now, readingAt, columns, details, met
       <Box columnGap={GAP}>
         {all.map(column => (
           <Box width={tile}>
-            {column.meter}
+            {column.meter !== undefined && column.meter}
           </Box>
         ))}
       </Box>
@@ -260,7 +286,8 @@ async function catchUp($: EngineInterface) {
 
 async function refresh($: EngineInterface) {
   await tick($)
-  await catchUp($)
+  // A store that cannot be read leaves this chat's own reading on show.
+  await catchUp($).catch(() => undefined)
 }
 
 // Toasts each window once per threshold it crosses; a reset re-arms it.
@@ -291,16 +318,16 @@ async function alert($: EngineInterface, limits: readonly Limit[]) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    const { rateLimits, context } = await $.session.usage()
+    // The chat's own context, which is live. Its rate limits are left to replies and to
+    // the saved reading: what the engine holds at a start may be a quiet chat's last
+    // numbers, and stamping them now would pass them off as new to every chat.
+    const { context } = await $.session.usage()
     await measureContext($, context)
-
-    if (rateLimits.length > 0 && (await read($, readingAtAtom)) === 0) {
-      await adopt($, [...rateLimits], await $.clock.now(), true)
-    }
-
     await refresh($)
-    // Keeps the countdowns current between replies, and picks up readings other chats save.
-    $.clock.every(60_000, () => void refresh($))
+    // Takes up a newer reading another chat saved within seconds, so every chat shows the same.
+    $.clock.every(5_000, () => void catchUp($).catch(() => undefined))
+    // Keeps the countdowns current between replies.
+    $.clock.every(60_000, () => void tick($))
 
     return next(e)
   })
@@ -350,7 +377,7 @@ export const register: Register = on => {
           now={now}
           readingAt={readingAt}
           columns={columns}
-          details={briefDetailsOf}
+          isBrief
           meter={meter}
         />
       )
@@ -367,7 +394,7 @@ export const register: Register = on => {
       )
 
       return (
-        <Band elements={{ Box, Text }} limits={limits} context={context} now={now} readingAt={readingAt} columns={columns} details={detailsOf} meter={meter} />
+        <Band elements={{ Box, Text }} limits={limits} context={context} now={now} readingAt={readingAt} columns={columns} isBrief={false} meter={meter} />
       )
     }
 

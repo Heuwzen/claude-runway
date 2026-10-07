@@ -19,7 +19,8 @@ In the terminal:
 - **Reset countdowns**, and a toast when a window crosses 80% and again at 95%.
 - **How full this chat's context window is**, as a third meter, once a reply has reported it.
 - **Level meters at any width.** The meters always sit on one row, whatever the text above them does. In the desktop app each meter has one fact beside its number: when its window resets, or when you're on course to hit the limit. The terminal fits more where there's room, dropping the reading's age first, then the reset time, as the window narrows.
-- **Your limits as soon as a chat opens.** Each chat saves its latest reading, and a new chat shows the newest one until its own first reply. The terminal also shows the reading's age ("as of 12m ago") where there's room. Open chats also pick up newer readings from each other once a minute.
+- **The same numbers in every chat.** Each chat saves its newest reading, and every open chat picks up the newest one any chat has within seconds. A new chat shows it before its own first reply. The terminal also shows the reading's age ("as of 12m ago") where there's room.
+- **No stale numbers.** Claude Code only learns your limits from a reply, and limits count your use everywhere. So when no chat has had a reply for 15 minutes, the band says "no recent reading" instead of numbers that may be wrong by now. A window that has reset since then shows when it reset.
 
 It reads the rate-limit information Claude Code already receives with each reply. It makes no requests of its own, and nothing leaves your machine.
 
@@ -36,6 +37,12 @@ git clone https://github.com/Heuwzen/claude-code-rate-limits ~/.claude/skills/ra
 ```
 
 New chats load it automatically. Update with `git -C ~/.claude/skills/rate-limits pull`, and uninstall by deleting the folder.
+
+In the desktop app, a chat that's already open keeps the copy of the mod it opened with. To have updates reach open chats too, add this to the `env` block of `~/.claude/settings.json`:
+
+```json
+"CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
+```
 
 To keep it somewhere else, add its folder to the `env` block of `~/.claude/settings.json` instead:
 
