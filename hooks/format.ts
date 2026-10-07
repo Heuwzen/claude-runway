@@ -115,7 +115,7 @@ export function compactTokens(count: number) {
 export const STALE_AFTER = 2 * 60_000
 // A reading older than this is not shown as numbers at all: limits count use anywhere,
 // and only a reply brings new ones, so by now they may well be wrong.
-export const OLD_AFTER = 15 * 60_000
+export const OLD_AFTER = 60 * 60_000
 
 export type LimitView = {
   // What the figure and the meter show: 0 once the window has reset since the reading.

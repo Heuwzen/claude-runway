@@ -142,8 +142,18 @@ test('shows a window that reset since an old reading as reset, without a number'
   await ui.unmount()
 })
 
-test('says there is no recent reading once the newest is 15 minutes old, rather than show numbers', async ($, on) => {
-  engine(on, { latest: { limits: LIMITS, at: NOW - 15 * 60_000 } }, { window: 1_000_000, tokens: 501_000, percent: 50 })
+test('still shows the numbers of a reading up to an hour old', async ($, on) => {
+  engine(on, { latest: { limits: LIMITS, at: NOW - 59 * 60_000 } })
+  await $.session.start(START)
+
+  const ui = await $.ui.mount({ plugin: 'RateLimits', surface: 'desktop', ...BAND })
+  expect(await ui.find({ type: 'Text', text: '62%' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'no recent reading' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('says there is no recent reading once the newest is an hour old, rather than show numbers', async ($, on) => {
+  engine(on, { latest: { limits: LIMITS, at: NOW - 60 * 60_000 } }, { window: 1_000_000, tokens: 501_000, percent: 50 })
   await $.session.start(START)
 
   for (const surface of SURFACES) {

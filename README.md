@@ -20,7 +20,7 @@ In the terminal:
 - **How full this chat's context window is**, as a third meter, once a reply has reported it.
 - **Level meters at any width.** The meters always sit on one row, whatever the text above them does. In the desktop app each meter has one fact beside its number: when its window resets, or when you're on course to hit the limit. The terminal fits more where there's room, dropping the reading's age first, then the reset time, as the window narrows.
 - **The same numbers in every chat.** Each chat saves its newest reading, and every open chat picks up the newest one any chat has within seconds. A new chat shows it before its own first reply. The terminal also shows the reading's age ("as of 12m ago") where there's room.
-- **No stale numbers.** Claude Code only learns your limits from a reply, and limits count your use everywhere. So when no chat has had a reply for 15 minutes, the band says "no recent reading" instead of numbers that may be wrong by now. A window that has reset since then shows when it reset.
+- **No stale numbers.** Claude Code only learns your limits from a reply, and limits count your use everywhere. So when no chat has had a reply for an hour, the band says "no recent reading" instead of numbers that may be wrong by now. A window that has reset since then shows when it reset.
 
 It reads the rate-limit information Claude Code already receives with each reply. It makes no requests of its own, and nothing leaves your machine.
 
