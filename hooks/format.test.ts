@@ -1,212 +1,246 @@
 import { expect, test } from 'claude-code/testing'
 
-import type { Level, Reading } from '../types'
+import type { App, Levels, Reading } from '../types'
 import {
-  detailsOf,
-  levelOf,
-  parseCores,
-  parseLoadavg,
-  parseMemoryFree,
+  appOf,
+  appsOf,
+  cpuLevelOf,
+  culpritOf,
+  formatBytes,
+  formatCores,
+  keepTop,
+  levelsOf,
+  memoryLevelOf,
+  parseIostat,
+  parsePs,
   parseSimulators,
+  parseSysctl,
+  parseTop,
   runtimeName,
+  simulatorsOf,
   statusOf,
   toastOf,
+  worstOf,
 } from './format'
 
+const NOW = Date.parse('2026-10-07T12:00:00Z')
+const CALM: Levels = { cpu: 'normal', memory: 'normal', simulators: 'normal' }
+
+const app = (name: string, cores: number, bytes?: number): App => ({
+  name,
+  cores,
+  ...(bytes === undefined ? {} : { bytes }),
+  processes: [{ name, count: 1, cores }],
+})
+
 const reading = (patch: Partial<Reading> = {}): Reading => ({
-  load: [3, 3, 3],
+  at: NOW,
+  cpu: 28,
   cores: 10,
-  memoryFree: 40,
-  simulators: [],
+  load: [3, 3, 3],
+  memory: 56,
+  pressure: 'normal',
+  simulators: 0,
+  apps: [app('Claude', 0.6, 1.2 * 1024 ** 3), app('macOS', 0.4, 0.7 * 1024 ** 3)],
   ...patch,
 })
 
-const sims = (count: number) =>
-  Array.from({ length: count }, (_, i) => ({ name: `iPhone ${i + 1}`, runtime: 'iOS 26.0' }))
-
-test('reads the load average', async () => {
-  expect(parseLoadavg('{ 3.12 2.95 2.80 }\n')).toEqual([3.12, 2.95, 2.8])
-  expect(parseLoadavg('{ 212,40 90,10 55,00 }')).toEqual([212.4, 90.1, 55])
-  expect(parseLoadavg('')).toBe(undefined)
-  expect(parseLoadavg('sysctl: unknown oid')).toBe(undefined)
+test('reads how busy the cores were from the second iostat row, never the first', async () => {
+  const header = '      cpu    load average\n us sy id   1m   5m   15m\n'
+  expect(parseIostat(`${header} 21 10 68  4.15 7.04 14.77\n 14  6 80  4.15 7.04 14.77\n`)).toBe(20)
+  expect(parseIostat(`${header} 21 10 68  4.15 7.04 14.77\n`)).toBe(undefined)
+  expect(parseIostat('')).toBe(undefined)
+  expect(parseIostat('iostat: illegal option')).toBe(undefined)
 })
 
-test('reads the core count', async () => {
-  expect(parseCores('10\n')).toBe(10)
-  expect(parseCores('')).toBe(undefined)
-  expect(parseCores('0')).toBe(undefined)
+test('reads the cores, memory, pressure, load and swap, whichever this Mac has', async () => {
+  const text = [
+    'hw.logicalcpu: 10',
+    'hw.memsize: 17179869184',
+    'kern.memorystatus_level: 40',
+    'kern.memorystatus_vm_pressure_level: 2',
+    'vm.loadavg: { 4.38 8.08 15.92 }',
+    'vm.swapusage: total = 3072.00M  used = 1586.19M  free = 1485.81M  (encrypted)',
+  ].join('\n')
+  expect(parseSysctl(text)).toEqual({
+    cores: 10,
+    ramBytes: 17179869184,
+    memory: 60,
+    pressure: 'warning',
+    load: [4.38, 8.08, 15.92],
+    swap: { usedBytes: 1586.19 * 1024 ** 2, totalBytes: 3072 * 1024 ** 2 },
+  })
+  expect(parseSysctl('hw.logicalcpu: 8\nsysctl: unknown oid')).toEqual({ cores: 8 })
+  expect(parseSysctl('vm.loadavg: { 212,40 90,10 55,00 }').load).toEqual([212.4, 90.1, 55])
+  expect(parseSysctl('hw.logicalcpu: 0\nkern.memorystatus_level: \nkern.memorystatus_vm_pressure_level: 3')).toEqual({})
 })
 
-test('reads free memory from the line after the page size', async () => {
-  const text = 'The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 23%\n'
-  expect(parseMemoryFree(text)).toBe(23)
-  expect(parseMemoryFree('nothing here')).toBe(undefined)
+test('reads ps rows, names with spaces included', async () => {
+  const text = '    1   0.6 /sbin/launchd\n91104  19,2 /Applications/Claude.app/Contents/MacOS/Claude Helper (Renderer)  \n  739   0.0 Core Audio Driver (X.driver)\n'
+  expect(parsePs(text)).toEqual([
+    { pid: 1, cpu: 0.6, command: '/sbin/launchd' },
+    { pid: 91104, cpu: 19.2, command: '/Applications/Claude.app/Contents/MacOS/Claude Helper (Renderer)' },
+    { pid: 739, cpu: 0, command: 'Core Audio Driver (X.driver)' },
+  ])
 })
 
-test('names a runtime from its identifier', async () => {
+test("reads each process's memory footprint from top", async () => {
+  const text = 'Processes: 828 total\nPhysMem: 15G used\n\nPID    MEM  \n91104  1272M+\n601    761M \n42254  2368K-\n7      1.5G\n'
+  expect([...parseTop(text)]).toEqual([
+    [91104, 1272 * 1024 ** 2],
+    [601, 761 * 1024 ** 2],
+    [42254, 2368 * 1024],
+    [7, 1.5 * 1024 ** 3],
+  ])
+})
+
+test('puts each process with its app', async () => {
+  const runtime = '/Library/Developer/CoreSimulator/Volumes/iOS_24A5380i/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot'
+  const cases: [string, string][] = [
+    ['/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)', 'Claude'],
+    ['/Users/me/Library/Application Support/Claude/claude-code/2.1.289/ee67e3f1ea60/claude.app/Contents/MacOS/claude', 'Claude'],
+    ['/Users/me/.local/bin/claude', 'Claude'],
+    [`${runtime}/System/Library/PrivateFrameworks/PosterBoard.framework/PlugIns/EmojiPosterExtension.appex/EmojiPosterExtension`, 'Simulator'],
+    ['/Users/me/Library/Developer/CoreSimulator/Devices/ABC/data/Containers/Bundle/Application/DEF/NoteOS.app/NoteOS', 'Simulator'],
+    ['/Applications/Xcode.app/Contents/Developer/Applications/Simulator.app/Contents/MacOS/Simulator', 'Simulator'],
+    ['/Library/Developer/PrivateFrameworks/CoreSimulator.framework/Versions/A/XPCServices/SimLaunchHost.arm64.xpc/Contents/MacOS/SimLaunchHost', 'Simulator'],
+    ['launchd_sim', 'Simulator'],
+    ['/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend', 'Xcode'],
+    ['/Applications/Xcode-beta.app/Contents/Developer/usr/bin/xcodebuild', 'Xcode'],
+    ['/Library/Developer/Toolchains/swift-6.2-RELEASE.xctoolchain/usr/bin/swift-frontend', 'Xcode'],
+    ['/Library/Developer/CommandLineTools/usr/bin/clang', 'Xcode'],
+    ['/System/Library/Frameworks/WebKit.framework/Versions/A/XPCServices/com.apple.WebKit.WebContent.xpc/Contents/MacOS/com.apple.WebKit.WebContent', 'Safari'],
+    ['/Applications/Brave Browser.app/Contents/Frameworks/Brave Browser Framework.framework/Helpers/Brave Browser Helper.app/Contents/MacOS/Brave Browser Helper', 'Brave Browser'],
+    ['/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder', 'Finder'],
+    ['/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer', 'macOS'],
+    ['/usr/libexec/diagnosticd', 'macOS'],
+    ['/sbin/launchd', 'macOS'],
+    ['/opt/homebrew/Cellar/node/24.1.0/bin/node', 'node'],
+    ['automountd', 'automountd'],
+  ]
+
+  for (const [command, name] of cases) {
+    expect([command, appOf(command)]).toEqual([command, name])
+  }
+})
+
+test("adds up each app's processes, busiest first, naming its busiest two", async () => {
+  const runtime = '/Library/Developer/CoreSimulator/Volumes/iOS/RuntimeRoot'
+  const apps = appsOf(
+    [
+      { pid: 1, cpu: 75, command: '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer' },
+      { pid: 2, cpu: 50, command: `${runtime}/EmojiPosterExtension` },
+      { pid: 3, cpu: 50, command: `${runtime}/EmojiPosterExtension` },
+      { pid: 4, cpu: 25, command: `${runtime}/KaleidoscopePoster` },
+      { pid: 5, cpu: 0, command: `${runtime}/sbin/launchd_sim` },
+    ],
+    new Map([[1, 800], [2, 100]]),
+  )
+
+  expect(apps).toEqual([
+    {
+      name: 'Simulator',
+      cores: 1.25,
+      bytes: 100,
+      processes: [{ name: 'EmojiPosterExtension', count: 2, cores: 1 }, { name: 'KaleidoscopePoster', count: 1, cores: 0.25 }],
+    },
+    { name: 'macOS', cores: 0.75, bytes: 800, processes: [{ name: 'WindowServer', count: 1, cores: 0.75 }] },
+  ])
+  expect(appsOf([{ pid: 1, cpu: 40, command: '/sbin/launchd' }])[0]?.bytes).toBe(undefined)
+  expect(simulatorsOf([{ pid: 5, cpu: 1, command: '/x/sbin/launchd_sim' }, { pid: 6, cpu: 0, command: 'launchd_sim' }])).toBe(2)
+})
+
+test('keeps the busiest apps and the largest, in order of how busy', async () => {
+  const apps = [app('A', 5, 1), app('B', 4, 9), app('C', 3, 2), app('D', 2, 8)]
+  expect(keepTop(apps, 1).map(kept => kept.name)).toEqual(['A', 'B'])
+  expect(keepTop(apps, 2).map(kept => kept.name)).toEqual(['A', 'B', 'D'])
+})
+
+test('calls the CPU busy from 85%, and holds it down to 70%', async () => {
+  expect(cpuLevelOf(reading({ cpu: 84 }), 'normal')).toBe('normal')
+  expect(cpuLevelOf(reading({ cpu: 85 }), 'normal')).toBe('busy')
+  expect(cpuLevelOf(reading({ cpu: 70 }), 'busy')).toBe('busy')
+  expect(cpuLevelOf(reading({ cpu: 69 }), 'busy')).toBe('normal')
+})
+
+test('calls the CPU overloaded only with work queueing for the cores', async () => {
+  // One build keeps every core busy without a queue.
+  expect(cpuLevelOf(reading({ cpu: 100, load: [18, 9, 5] }), 'normal')).toBe('busy')
+  expect(cpuLevelOf(reading({ cpu: 100, load: [30, 9, 5] }), 'normal')).toBe('overloaded')
+  expect(cpuLevelOf(reading({ cpu: 89, load: [40, 9, 5] }), 'normal')).toBe('busy')
+  // macOS's load lags behind: a high one over idle cores is not an overload.
+  expect(cpuLevelOf(reading({ cpu: 31, load: [27, 30, 27] }), 'normal')).toBe('normal')
+  expect(cpuLevelOf(reading({ cpu: 75, load: [20, 9, 5] }), 'overloaded')).toBe('overloaded')
+  expect(cpuLevelOf(reading({ cpu: 75, load: [19, 9, 5] }), 'overloaded')).toBe('busy')
+  expect(cpuLevelOf(reading({ cpu: 100, load: undefined }), 'normal')).toBe('busy')
+})
+
+test("follows macOS's memory pressure, and the share in use where macOS gives none", async () => {
+  expect(memoryLevelOf({ memory: 99, pressure: 'normal' })).toBe('normal')
+  expect(memoryLevelOf({ memory: 60, pressure: 'warning' })).toBe('busy')
+  expect(memoryLevelOf({ memory: 90, pressure: 'critical' })).toBe('overloaded')
+  expect([84, 85, 92].map(memory => memoryLevelOf({ memory }))).toEqual(['normal', 'busy', 'overloaded'])
+  expect(memoryLevelOf({})).toBe('normal')
+})
+
+test('marks three booted simulators busy, and takes the worst level as the whole', async () => {
+  expect(levelsOf(reading({ simulators: 3 }), CALM)).toEqual({ cpu: 'normal', memory: 'normal', simulators: 'busy' })
+  expect(worstOf({ cpu: 'busy', memory: 'overloaded', simulators: 'normal' })).toBe('overloaded')
+  expect(worstOf(CALM)).toBe('normal')
+})
+
+test('writes cores and sizes the way Activity Monitor readers expect', async () => {
+  expect([0.56, 1, 1.04, 1.4, 2, 3.12, 8].map(formatCores)).toEqual(['0.6 cores', '1 core', '1 core', '1.4 cores', '2 cores', '3 cores', '8 cores'])
+  expect([700 * 1024 ** 2, 1.2 * 1024 ** 3, 16 * 1024 ** 3].map(formatBytes)).toEqual(['700 MB', '1.2 GB', '16 GB'])
+})
+
+test('names the app behind the worst strain, and none when nothing stands out', async () => {
+  const busy = reading({ apps: [app('Xcode', 7.9, 1024 ** 3), app('Claude', 0.6, 2 * 1024 ** 3)] })
+  expect(culpritOf(busy, { ...CALM, cpu: 'busy' })?.text).toBe('Xcode using 8 cores')
+  expect(culpritOf(busy, { ...CALM, memory: 'busy' })?.text).toBe('Claude using 2 GB')
+  expect(culpritOf(busy, { ...CALM, cpu: 'busy', memory: 'overloaded' })?.text).toBe('Claude using 2 GB')
+  expect(culpritOf(busy, CALM)).toBe(undefined)
+  expect(culpritOf(reading({ apps: [app('macOS', 0.3)] }), { ...CALM, cpu: 'busy' })).toBe(undefined)
+  expect(culpritOf(reading({ apps: [app('Xcode', 4)] }), { ...CALM, memory: 'busy' })).toBe(undefined)
+  // When no app stands out for the worse strain, the other strain's app is named.
+  expect(culpritOf(reading({ apps: [app('macOS', 0.3, 2 * 1024 ** 3)] }), { ...CALM, cpu: 'busy', memory: 'busy' })?.text).toBe('macOS using 2 GB')
+})
+
+test('writes the status line: each strain marked, the culprit, and the age once stale', async () => {
+  expect(statusOf(reading(), CALM, NOW)).toBe('CPU 28% · Memory 56%')
+  expect(statusOf(reading({ simulators: 1 }), CALM, NOW)).toBe('CPU 28% · Memory 56% · 1 sim')
+  expect(statusOf(reading({ cpu: 100, simulators: 1, apps: [app('Simulator', 3.1)] }), { ...CALM, cpu: 'overloaded' }, NOW)).toBe(
+    'CPU ◆ 100% · Memory 56% · Simulator using 3 cores',
+  )
+  expect(statusOf(reading({ simulators: 4 }), { ...CALM, simulators: 'busy' }, NOW)).toBe('CPU 28% · Memory 56% · ▲ 4 sims')
+  expect(statusOf(reading({ memory: undefined }), CALM, NOW)).toBe('CPU 28%')
+  expect(statusOf(reading(), CALM, NOW + 74_000)).toBe('CPU 28% · Memory 56%')
+  expect(statusOf(reading(), CALM, NOW + 75_000)).toBe('CPU 28% · Memory 56% · as of 1m ago')
+  expect(statusOf(reading(), CALM, NOW + 2 * 3_600_000)).toBe('CPU 28% · Memory 56% · as of 2h ago')
+})
+
+test('toasts only an overload, with advice where it helps', async () => {
+  const sims = reading({ cpu: 100, apps: [app('Simulator', 3.1)] })
+  expect(toastOf(sims, { ...CALM, cpu: 'busy' })).toBe(undefined)
+  expect(toastOf(sims, { ...CALM, cpu: 'overloaded' })).toBe('Mac is overloaded: CPU at 100%, Simulator using 3 cores. Shut down simulators you are not using.')
+  expect(toastOf(reading({ cpu: 97, apps: [app('Xcode', 9.4)] }), { ...CALM, cpu: 'overloaded' })).toBe(
+    'Mac is overloaded: CPU at 97%, Xcode using 9 cores. Run fewer builds at once.',
+  )
+  expect(toastOf(reading({ cpu: 100, apps: [app('Claude', 0.4, 3 * 1024 ** 3)] }), { cpu: 'overloaded', memory: 'overloaded', simulators: 'normal' })).toBe(
+    'Mac is overloaded: CPU at 100% and memory nearly full, Claude using 3 GB.',
+  )
+})
+
+test('names simulator runtimes and reads the booted devices', async () => {
   expect(runtimeName('com.apple.CoreSimulator.SimRuntime.iOS-26-0')).toBe('iOS 26.0')
-  expect(runtimeName('com.apple.CoreSimulator.SimRuntime.watchOS-11-0')).toBe('watchOS 11.0')
-  expect(runtimeName('com.apple.CoreSimulator.SimRuntime.visionOS')).toBe('visionOS')
-})
-
-test('lists the booted simulators and ignores anything unreadable', async () => {
-  const json = JSON.stringify({
+  expect(runtimeName('com.apple.CoreSimulator.SimRuntime.watchOS-11-2')).toBe('watchOS 11.2')
+  const text = JSON.stringify({
     devices: {
-      'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
-        { name: 'iPhone 17 Pro', state: 'Booted', udid: 'A' },
-        { name: 'iPhone 17', state: 'Shutdown', udid: 'B' },
-      ],
-      'com.apple.CoreSimulator.SimRuntime.iOS-18-2': [{ name: 'iPad Air', state: 'Booted', udid: 'C' }],
-      'com.apple.CoreSimulator.SimRuntime.tvOS-26-0': [],
+      'com.apple.CoreSimulator.SimRuntime.iOS-27-0': [{ name: 'iPhone 17 Pro', state: 'Booted' }, { name: 'iPad', state: 'Shutdown' }],
+      broken: 'x',
     },
   })
-  expect(parseSimulators(json)).toEqual([
-    { name: 'iPhone 17 Pro', runtime: 'iOS 26.0' },
-    { name: 'iPad Air', runtime: 'iOS 18.2' },
-  ])
-  expect(parseSimulators('{ "devices": {} }')).toEqual([])
+  expect(parseSimulators(text)).toEqual([{ name: 'iPhone 17 Pro', runtime: 'iOS 27.0' }])
   expect(parseSimulators('not json')).toEqual([])
   expect(parseSimulators('null')).toEqual([])
-  expect(parseSimulators('{ "devices": { "x": [null, 3] } }')).toEqual([])
-})
-
-test('is normal on a calm Mac', async () => {
-  expect(levelOf(reading(), 'normal')).toBe('normal')
-})
-
-test('turns busy at 1.5 times the cores, under 15% memory or with 3 simulators', async () => {
-  expect(levelOf(reading({ load: [14.9, 0, 0] }), 'normal')).toBe('normal')
-  expect(levelOf(reading({ load: [15, 0, 0] }), 'normal')).toBe('busy')
-  expect(levelOf(reading({ memoryFree: 15 }), 'normal')).toBe('normal')
-  expect(levelOf(reading({ memoryFree: 14 }), 'normal')).toBe('busy')
-  expect(levelOf(reading({ simulators: sims(2) }), 'normal')).toBe('normal')
-  expect(levelOf(reading({ simulators: sims(3) }), 'normal')).toBe('busy')
-})
-
-test('turns overloaded at 3 times the cores or under 8% memory', async () => {
-  expect(levelOf(reading({ load: [29.9, 0, 0] }), 'normal')).toBe('busy')
-  expect(levelOf(reading({ load: [30, 0, 0] }), 'normal')).toBe('overloaded')
-  expect(levelOf(reading({ memoryFree: 8 }), 'normal')).toBe('busy')
-  expect(levelOf(reading({ memoryFree: 7 }), 'normal')).toBe('overloaded')
-  expect(levelOf(reading({ load: [200, 0, 0], simulators: sims(5) }), 'busy')).toBe('overloaded')
-})
-
-test('ignores memory when it could not be read', async () => {
-  expect(levelOf(reading({ memoryFree: undefined }), 'normal')).toBe('normal')
-  expect(levelOf(reading({ memoryFree: undefined, load: [15, 0, 0] }), 'busy')).toBe('busy')
-})
-
-test('leaves busy only well clear of every busy limit', async () => {
-  // Below 15 but not below 0.8 x 15 = 12.
-  expect(levelOf(reading({ load: [13, 0, 0] }), 'busy')).toBe('busy')
-  expect(levelOf(reading({ load: [11.9, 0, 0] }), 'busy')).toBe('normal')
-  // Memory must be back to 20% (15 + 5).
-  expect(levelOf(reading({ memoryFree: 19 }), 'busy')).toBe('busy')
-  expect(levelOf(reading({ memoryFree: 20 }), 'busy')).toBe('normal')
-  // Fewer than 3 simulators.
-  expect(levelOf(reading({ simulators: sims(3) }), 'busy')).toBe('busy')
-  expect(levelOf(reading({ simulators: sims(2) }), 'busy')).toBe('normal')
-  // A calm Mac does not hold a level it was never in.
-  expect(levelOf(reading({ load: [13, 0, 0] }), 'normal')).toBe('normal')
-})
-
-test('leaves overloaded only well clear of its limits, then settles on busy or normal', async () => {
-  // Below 30 but not below 0.8 x 30 = 24.
-  expect(levelOf(reading({ load: [26, 0, 0] }), 'overloaded')).toBe('overloaded')
-  // Under 24 but still over the busy line.
-  expect(levelOf(reading({ load: [20, 0, 0] }), 'overloaded')).toBe('busy')
-  // Memory must be back to 13% (8 + 5).
-  expect(levelOf(reading({ memoryFree: 12 }), 'overloaded')).toBe('overloaded')
-  expect(levelOf(reading({ memoryFree: 13 }), 'overloaded')).toBe('busy')
-  // Clear of overloaded, and nearly clear of busy: busy holds until it is clear too.
-  expect(levelOf(reading({ load: [13, 0, 0] }), 'overloaded')).toBe('busy')
-  expect(levelOf(reading({ load: [5, 0, 0] }), 'overloaded')).toBe('normal')
-})
-
-test('does not flap around a threshold', async () => {
-  let level: Level = 'normal'
-  const seen: Level[] = []
-
-  for (const load1 of [10, 14, 15, 14, 13, 12.5, 11, 14, 15]) {
-    level = levelOf(reading({ load: [load1, 0, 0] }), level)
-    seen.push(level)
-  }
-
-  expect(seen).toEqual(['normal', 'normal', 'busy', 'busy', 'busy', 'busy', 'normal', 'normal', 'busy'])
-})
-
-test('writes the status line, with a mark when busy or overloaded', async () => {
-  const calm = reading({ load: [6.2, 0, 0], memoryFree: 23, simulators: sims(2) })
-  expect(statusOf(calm, 'normal')).toBe('Mac load 6.2 / 10 cores · 23% memory free · 2 simulators')
-  expect(statusOf(calm, 'busy')).toBe('▲ Mac load 6.2 / 10 cores · 23% memory free · 2 simulators')
-  expect(statusOf(reading({ load: [6.2, 0, 0], memoryFree: 23 }), 'overloaded')).toBe(
-    '◆ Mac load 6.2 / 10 cores · 23% memory free',
-  )
-  expect(statusOf(reading({ load: [6.2, 0, 0], simulators: sims(1) }), 'normal')).toBe(
-    'Mac load 6.2 / 10 cores · 40% memory free · 1 simulator',
-  )
-  expect(statusOf(reading({ load: [6.2, 0, 0], memoryFree: undefined }), 'normal')).toBe('Mac load 6.2 / 10 cores')
-})
-
-test('keeps the status line under 70 characters at its longest', async () => {
-  const worst = reading({ load: [212.46, 0, 0], cores: 12, memoryFree: 100, simulators: sims(12) })
-  expect(statusOf(worst, 'overloaded').length).toBeLessThan(70)
-})
-
-test('toasts on entering busy, entering overloaded and escalating', async () => {
-  const busy = reading({ load: [18, 0, 0], simulators: sims(3) })
-  expect(toastOf(busy, 'normal', 'busy')).toBe('Mac is busy: load 18 on 10 cores, 3 simulators booted')
-
-  const bogged = reading({ load: [34, 0, 0], memoryFree: 9 })
-  const overloaded = 'Mac is overloaded: load 34 on 10 cores, 9% memory free. Shut down simulators or pause builds.'
-  expect(toastOf(bogged, 'normal', 'overloaded')).toBe(overloaded)
-  expect(toastOf(bogged, 'busy', 'overloaded')).toBe(overloaded)
-})
-
-test('says nothing when staying put or stepping down', async () => {
-  const bogged = reading({ load: [34, 0, 0] })
-  expect(toastOf(bogged, 'overloaded', 'overloaded')).toBe(undefined)
-  expect(toastOf(bogged, 'busy', 'busy')).toBe(undefined)
-  expect(toastOf(bogged, 'overloaded', 'busy')).toBe(undefined)
-  expect(toastOf(bogged, 'busy', 'normal')).toBe(undefined)
-  expect(toastOf(bogged, 'normal', 'normal')).toBe(undefined)
-})
-
-test('names only the causes that apply in the busy toast', async () => {
-  expect(toastOf(reading({ load: [16, 0, 0] }), 'normal', 'busy')).toBe('Mac is busy: load 16 on 10 cores')
-  expect(toastOf(reading({ memoryFree: 12 }), 'normal', 'busy')).toBe('Mac is busy: load 3 on 10 cores, 12% memory free')
-})
-
-test('details the load, the memory and each booted simulator', async () => {
-  const text = detailsOf(
-    reading({
-      load: [6.2, 5.9, 5.6],
-      memoryFree: 23,
-      simulators: [
-        { name: 'iPhone 17 Pro', runtime: 'iOS 26.0' },
-        { name: 'iPad Air', runtime: 'iOS 18.2' },
-      ],
-    }),
-    'busy',
-  )
-  expect(text).toBe(
-    [
-      'Mac load: busy',
-      'Load: 6.2 (1 min), 5.9 (5 min), 5.6 (15 min), on 10 cores',
-      'Busy from load 15, overloaded from 30',
-      'Memory free: 23%',
-      'Simulators booted: 2',
-      '  iPhone 17 Pro (iOS 26.0)',
-      '  iPad Air (iOS 18.2)',
-      'Shut them all down: xcrun simctl shutdown all',
-    ].join('\n'),
-  )
-})
-
-test('gives no shutdown hint without simulators', async () => {
-  const text = detailsOf(reading({ memoryFree: undefined, load: [212.4, 90.1, 55] }), 'overloaded')
-  expect(text).toContain('Load: 212 (1 min), 90.1 (5 min), 55.0 (15 min)')
-  expect(text).toContain('Memory free: unknown')
-  expect(text).toContain('Simulators booted: none')
-  expect(text).not.toContain('simctl')
 })

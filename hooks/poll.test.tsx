@@ -9,66 +9,99 @@ const COMMAND = {
   origin: { kind: 'composer' },
   presentation: { isFullscreen: false, columns: 80 },
 } as const
-const SIMULATOR_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0'
+const measured = () => ({ context: { window: 200_000 }, rateLimits: [], changed: [] })
+
+const CLAUDE = '/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)'
+const SWIFT = '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend'
+const RUNTIME = '/Library/Developer/CoreSimulator/Volumes/iOS_24A5380i/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 27.0.simruntime/Contents/Resources/RuntimeRoot'
+const POSTER = `${RUNTIME}/System/Library/PrivateFrameworks/PosterBoard.framework/PlugIns/EmojiPosterExtension.appex/EmojiPosterExtension`
+const LAUNCHD_SIM = `${RUNTIME}/sbin/launchd_sim`
+const WINDOW_SERVER = '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer'
 
 type World = {
-  // The text each command prints; undefined makes that command fail.
-  loadavg?: string
-  cores?: string
-  memory?: string
-  simulators?: string
-  // Commands that cannot start, as when the program is missing.
+  // What each program writes; undefined makes it exit 1.
+  iostat?: string
+  ps?: string
+  sysctl?: string
+  top?: string
+  simctl?: string
+  // Programs that cannot start, as on a system without them.
   missing?: string[]
 }
 
-const simulators = (count: number) =>
-  JSON.stringify({
-    devices: {
-      [SIMULATOR_RUNTIME]: Array.from({ length: count }, (_, i) => ({ name: `iPhone ${i + 1}`, state: 'Booted' })),
-    },
-  })
+// The two rows `iostat -n0 -c 2 -w 2` writes: since boot, then the last two seconds.
+const iostat = (busy: number) =>
+  ['      cpu    load average', ' us sy id   1m   5m   15m', ' 10  5 85  2.00 2.00 2.00', ` ${busy} 0 ${100 - busy}  2.00 2.00 2.00`].join('\n')
 
-const calm = (): World => ({
-  loadavg: '{ 3.12 2.95 2.80 }',
-  cores: '10',
-  memory: 'The system has 17179869184 (1048576 pages with a page size of 16384).\nSystem-wide memory free percentage: 40%\n',
-  simulators: simulators(0),
+const sysctl = ({ available = 44, pressure = 1, load = 3 } = {}) =>
+  [
+    'hw.logicalcpu: 10',
+    'hw.memsize: 17179869184',
+    `kern.memorystatus_level: ${available}`,
+    `kern.memorystatus_vm_pressure_level: ${pressure}`,
+    `vm.loadavg: { ${load.toFixed(2)} 5.00 5.00 }`,
+    'vm.swapusage: total = 3072.00M  used = 1586.19M  free = 1485.81M  (encrypted)',
+  ].join('\n')
+
+const ps = (rows: [number, number, string][]) => rows.map(([pid, cpu, command]) => `${pid} ${cpu.toFixed(1)} ${command}`).join('\n')
+
+const top = (rows: [number, string][]) =>
+  ['Processes: 828 total, 4 running', '', 'PID    MEM  ', ...rows.map(([pid, mem]) => `${pid}  ${mem}`)].join('\n')
+
+const BOOTED = JSON.stringify({
+  devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-27-0': [{ name: 'iPhone 17 Pro', state: 'Booted' }] },
 })
 
-const loadavg = (load1: number) => `{ ${load1.toFixed(2)} 5.00 5.00 }`
+const calm = (): World => ({
+  iostat: iostat(28),
+  sysctl: sysctl(),
+  ps: ps([[601, 40, WINDOW_SERVER], [91104, 60, CLAUDE], [44001, 0, LAUNCHD_SIM]]),
+  top: top([[91104, '1240M'], [601, '760M'], [44001, '12M']]),
+  simctl: BOOTED,
+})
+
+// Xcode building on every core, with Claude beside it.
+const building = (): [number, number, string][] => [
+  ...Array.from({ length: 8 }, (_, i): [number, number, string] => [5000 + i, 100, SWIFT]),
+  [91104, 60, CLAUDE],
+]
+
+const PROGRAMS: Record<string, keyof World> = {
+  '/usr/sbin/iostat': 'iostat',
+  '/bin/ps': 'ps',
+  '/usr/sbin/sysctl': 'sysctl',
+  '/usr/bin/top': 'top',
+  '/usr/bin/xcrun': 'simctl',
+}
 
 // Stands in for the host beneath the plugin: its commands (answered from `world`, and
-// counted in `calls`), its clock, its status line and its toasts.
-function engine(on: On, world: World) {
-  const toasts: { text: string; timeoutMs?: number }[] = []
+// counted in `calls`), its store (holding `stored`), its clock, status line and toasts.
+function engine(on: On, world: World, stored: Record<string, unknown> = {}) {
+  const toasts: string[] = []
   const status: (string | undefined)[] = []
-  const calls: string[][] = []
-  const timeouts: (number | undefined)[] = []
+  const calls: { argv: string[]; timeoutMs?: number; env?: Record<string, string> }[] = []
   const clock = mock.clock(on, { now: NOW })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('process.run', (_, e) => {
-    calls.push([...e.argv])
-    timeouts.push(e.init?.timeoutMs)
-    const [program, ...args] = e.argv
+  on('store.get', (_, e) => ({ value: stored[e.key] }))
+  on('store.set', (_, e) => {
+    stored[e.key] = e.value
 
-    if (program === undefined || world.missing?.includes(program)) {
+    return { value: undefined }
+  })
+  on('process.run', (_, e) => {
+    const [program = ''] = e.argv
+    calls.push({ argv: [...e.argv], timeoutMs: e.init?.timeoutMs, env: e.init?.env })
+
+    if (world.missing?.includes(program) || PROGRAMS[program] === undefined) {
       throw new Error(`spawn ${program} ENOENT`)
     }
 
-    const text =
-      program === 'sysctl' ? (args.includes('vm.loadavg') ? world.loadavg : world.cores)
-      : program === 'memory_pressure' ? world.memory
-      : world.simulators
+    const text = world[PROGRAMS[program]] as string | undefined
 
     return {
-      value: {
-        exitCode: text === undefined ? 1 : 0,
-        stdout: text ?? '',
-        stderr: '',
-        isStdoutTruncated: false,
-        isStderrTruncated: false,
-      },
+      value: { exitCode: text === undefined ? 1 : 0, stdout: text ?? '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
     }
   })
   on('ui.status', (_, e) => {
@@ -77,213 +110,229 @@ function engine(on: On, world: World) {
     return { value: undefined }
   })
   on('ui.toast', (_, e) => {
-    toasts.push({ text: e.text, timeoutMs: e.timeoutMs })
+    toasts.push(e.text)
 
     return { value: undefined }
   })
 
-  return { toasts, status, calls, timeouts, clock }
+  const programs = () => calls.map(call => call.argv[0])
+
+  return { toasts, status, calls, programs, clock, stored }
 }
 
-test('shows the load on session start, with no mark when calm', async ($, on) => {
+test('shows CPU, memory and booted simulators from the start', async ($, on) => {
   const { status, toasts, clock } = engine(on, calm())
   await $.session.start(START)
   await clock.settle()
 
-  expect(status.at(-1)).toBe('Mac load 3.1 / 10 cores · 40% memory free')
+  expect(status).toEqual(['CPU 28% · Memory 56% · 1 sim'])
   expect(toasts).toEqual([])
 })
 
-test('reads with short timeouts, and only with commands that write nothing', async ($, on) => {
-  const { calls, timeouts, clock } = engine(on, calm())
+test('reads with absolute paths, the C locale and timeouts, and only programs that read', async ($, on) => {
+  const { calls, programs, clock } = engine(on, calm())
   await $.session.start(START)
   await clock.settle()
 
-  expect(calls).toEqual([
-    ['sysctl', '-n', 'vm.loadavg'],
-    ['sysctl', '-n', 'hw.logicalcpu'],
-    ['memory_pressure', '-Q'],
-    ['xcrun', 'simctl', 'list', 'devices', 'booted', '--json'],
+  expect(calls.map(call => call.argv)).toEqual([
+    ['/usr/sbin/iostat', '-n0', '-c', '2', '-w', '2'],
+    ['/bin/ps', '-A', '-o', 'pid=,pcpu=,comm='],
+    [
+      '/usr/sbin/sysctl',
+      'hw.logicalcpu',
+      'hw.memsize',
+      'kern.memorystatus_level',
+      'kern.memorystatus_vm_pressure_level',
+      'vm.loadavg',
+      'vm.swapusage',
+    ],
   ])
-  expect(timeouts.length).toBe(4)
-  expect(timeouts.every(ms => ms !== undefined && ms <= 5000)).toBe(true)
+  expect(calls.every(call => call.timeoutMs === 10_000 && call.env?.LC_ALL === 'C')).toBe(true)
+  // Memory by app, and the simulators by name, are read only when wanted.
+  expect(programs()).not.toContain('/usr/bin/top')
+  expect(programs()).not.toContain('/usr/bin/xcrun')
 })
 
-test('polls every 30 seconds', async ($, on) => {
+test('reads again every 30 seconds, and leaves an unchanged line alone', async ($, on) => {
   const world = calm()
   const { status, clock } = engine(on, world)
   await $.session.start(START)
   await clock.settle()
-  world.loadavg = loadavg(6.2)
-  await clock.advance(29_000)
-  expect(status.at(-1)).toContain('Mac load 3.1')
-  await clock.advance(1_000)
+  await clock.advance(30_000)
+  expect(status).toHaveLength(1)
 
-  expect(status.at(-1)).toBe('Mac load 6.2 / 10 cores · 40% memory free')
+  world.iostat = iostat(41)
+  await clock.advance(29_000)
+  expect(status).toHaveLength(1)
+  await clock.advance(1_000)
+  expect(status.at(-1)).toBe('CPU 41% · Memory 56% · 1 sim')
 })
 
-test('counts the booted simulators, and says nothing about them when xcrun is missing', async ($, on) => {
-  const world = { ...calm(), simulators: simulators(2) }
+test('names the busiest app while the CPU is busy, without a toast', async ($, on) => {
+  const { status, toasts, clock } = engine(on, { ...calm(), iostat: iostat(92), sysctl: sysctl({ load: 14 }), ps: ps(building()) })
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(status.at(-1)).toBe('CPU ▲ 92% · Memory 56% · Xcode using 8 cores')
+  expect(toasts).toEqual([])
+})
+
+test('holds a busy CPU until it falls well below where it started', async ($, on) => {
+  const world = { ...calm(), iostat: iostat(86) }
   const { status, clock } = engine(on, world)
   await $.session.start(START)
   await clock.settle()
-  expect(status.at(-1)).toBe('Mac load 3.1 / 10 cores · 40% memory free · 2 simulators')
+  expect(status.at(-1)).toStartWith('CPU ▲ 86%')
 
-  world.missing = ['xcrun']
+  world.iostat = iostat(72)
   await clock.advance(30_000)
-  expect(status.at(-1)).toBe('Mac load 3.1 / 10 cores · 40% memory free')
+  expect(status.at(-1)).toStartWith('CPU ▲ 72%')
+
+  world.iostat = iostat(64)
+  await clock.advance(30_000)
+  expect(status.at(-1)).toStartWith('CPU 64%')
 })
 
-test('toasts for 10 seconds on entering busy, once, and on escalating to overloaded', async ($, on) => {
-  const world = { ...calm(), simulators: simulators(3), loadavg: loadavg(18) }
-  const { toasts, status, clock } = engine(on, world)
+test('toasts once as the CPU is overloaded, and not again for 10 minutes', async ($, on) => {
+  const spike = ps([...Array.from({ length: 13 }, (_, i): [number, number, string] => [6000 + i, 24, POSTER]), [44001, 0, LAUNCHD_SIM], [91104, 60, CLAUDE]])
+  const world = { ...calm(), iostat: iostat(100), sysctl: sysctl({ load: 40 }), ps: spike }
+  const { status, toasts, clock } = engine(on, world)
   await $.session.start(START)
   await clock.settle()
 
-  expect(toasts).toEqual([{ text: 'Mac is busy: load 18 on 10 cores, 3 simulators booted', timeoutMs: 10_000 }])
-  expect(status.at(-1)).toBe('▲ Mac load 18.0 / 10 cores · 40% memory free · 3 simulators')
+  expect(status.at(-1)).toBe('CPU ◆ 100% · Memory 56% · Simulator using 3 cores')
+  expect(toasts).toEqual(['Mac is overloaded: CPU at 100%, Simulator using 3 cores. Shut down simulators you are not using.'])
 
+  await clock.advance(30_000)
+  world.iostat = iostat(30)
+  world.sysctl = sysctl({ load: 12 })
+  await clock.advance(30_000)
+  expect(status.at(-1)).toBe('CPU 30% · Memory 56% · 1 sim')
+
+  world.iostat = iostat(100)
+  world.sysctl = sysctl({ load: 40 })
   await clock.advance(30_000)
   expect(toasts).toHaveLength(1)
 
-  world.loadavg = loadavg(34)
-  world.memory = 'System-wide memory free percentage: 9%\n'
-  await clock.advance(30_000)
-
-  expect(toasts.at(-1)).toEqual({
-    text: 'Mac is overloaded: load 34 on 10 cores, 9% memory free. Shut down simulators or pause builds.',
-    timeoutMs: 10_000,
-  })
-  expect(status.at(-1)).toStartWith('◆ Mac load 34.0')
-  expect(toasts).toHaveLength(2)
-})
-
-test('keeps its level until the Mac is well clear, without toasting again', async ($, on) => {
-  const world = { ...calm(), loadavg: loadavg(16) }
-  const { toasts, status, clock } = engine(on, world)
-  await $.session.start(START)
-  await clock.settle()
-  expect(toasts).toHaveLength(1)
-
-  world.loadavg = loadavg(13)
-  await clock.advance(30_000)
-  expect(status.at(-1)).toStartWith('▲ ')
-
-  world.loadavg = loadavg(11)
-  await clock.advance(30_000)
-  expect(status.at(-1)).toStartWith('Mac load 11.0')
-
-  world.loadavg = loadavg(16)
+  world.iostat = iostat(30)
+  world.sysctl = sysctl({ load: 12 })
+  await clock.advance(9 * 60_000)
+  world.iostat = iostat(100)
+  world.sysctl = sysctl({ load: 40 })
   await clock.advance(30_000)
   expect(toasts).toHaveLength(2)
 })
 
-test('clears the status line and stops polling when sysctl is missing', async ($, on) => {
-  const world: World = { ...calm(), missing: ['sysctl'] }
+test('takes macOS at its word on memory, and names the largest app', async ($, on) => {
+  const { status, programs, clock } = engine(on, { ...calm(), sysctl: sysctl({ available: 40, pressure: 2 }) })
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(status.at(-1)).toBe('CPU 28% · Memory ▲ 60% · Claude using 1.2 GB')
+  expect(programs()).toContain('/usr/bin/top')
+})
+
+test('toasts when macOS says memory is critical', async ($, on) => {
+  const { toasts, clock } = engine(on, { ...calm(), sysctl: sysctl({ available: 6, pressure: 4 }) })
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(toasts).toEqual(['Mac is overloaded: memory nearly full, Claude using 1.2 GB.'])
+})
+
+test('marks three booted simulators, without a toast', async ($, on) => {
+  const three = ps([[44001, 0, LAUNCHD_SIM], [44002, 0, LAUNCHD_SIM], [44003, 0, LAUNCHD_SIM], [601, 40, WINDOW_SERVER]])
+  const { status, toasts, clock } = engine(on, { ...calm(), ps: three })
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(status.at(-1)).toBe('CPU 28% · Memory 56% · ▲ 3 sims')
+  expect(toasts).toEqual([])
+})
+
+test('gives up quietly after three failed readings on a system it has never read', async ($, on) => {
+  const world: World = { ...calm(), missing: Object.keys(PROGRAMS) }
   const { status, calls, clock } = engine(on, world)
   await $.session.start(START)
   await clock.settle()
+  await clock.advance(60_000)
 
   expect(status).toEqual([undefined])
 
   const before = calls.length
   world.missing = []
   await clock.advance(120_000)
-  expect(calls.length).toBe(before)
-  expect(status).toEqual([undefined])
-})
-
-test('stops when sysctl fails with an error code, as on a system without the key', async ($, on) => {
-  const { status, calls, clock } = engine(on, { ...calm(), loadavg: undefined })
-  await $.session.start(START)
+  await $.session.measure(measured())
   await clock.settle()
-  const before = calls.length
-  await clock.advance(60_000)
-
-  expect(status).toEqual([undefined])
   expect(calls.length).toBe(before)
 })
 
-test('survives a lone failed reading but stops after three in a row', async ($, on) => {
+test('keeps going on a Mac it has read before, showing the age of the last reading', async ($, on) => {
   const world = calm()
-  const { status, calls, clock } = engine(on, world)
+  const { status, clock } = engine(on, world, { worked: true })
   await $.session.start(START)
   await clock.settle()
 
-  world.loadavg = undefined
-  await clock.advance(30_000)
-  expect(status.at(-1)).toContain('Mac load 3.1')
-
-  world.loadavg = loadavg(4)
-  await clock.advance(30_000)
-  expect(status.at(-1)).toContain('Mac load 4.0')
-
-  world.loadavg = undefined
-  await clock.advance(30_000)
-  await clock.advance(30_000)
-  expect(status.at(-1)).toContain('Mac load 4.0')
-  await clock.advance(30_000)
-  expect(status.at(-1)).toBe(undefined)
-
-  const before = calls.length
+  world.iostat = undefined
   await clock.advance(60_000)
-  expect(calls.length).toBe(before)
-})
+  expect(status.at(-1)).toBe('CPU 28% · Memory 56% · 1 sim')
+  await clock.advance(120_000)
+  expect(status.at(-1)).toBe('CPU 28% · Memory 56% · 1 sim · as of 3m ago')
 
-test('keeps the last core count when it cannot be read', async ($, on) => {
-  const world = calm()
-  const { status, clock } = engine(on, world)
-  await $.session.start(START)
-  await clock.settle()
-
-  world.cores = undefined
-  world.loadavg = loadavg(5)
+  world.iostat = iostat(35)
   await clock.advance(30_000)
-  expect(status.at(-1)).toBe('Mac load 5.0 / 10 cores · 40% memory free')
+  expect(status.at(-1)).toBe('CPU 35% · Memory 56% · 1 sim')
 })
 
-test('leaves memory out when memory_pressure is missing', async ($, on) => {
-  const { status, clock } = engine(on, { ...calm(), missing: ['memory_pressure'] })
+test('remembers for later chats that this Mac can be read', async ($, on) => {
+  const { stored, clock } = engine(on, calm())
   await $.session.start(START)
   await clock.settle()
 
-  expect(status.at(-1)).toBe('Mac load 3.1 / 10 cores')
+  expect(stored.worked).toBe(true)
 })
 
-test('/mac-load details the load, the memory and the simulators', async ($, on) => {
-  const { clock } = engine(on, { ...calm(), simulators: simulators(2) })
+test('starts reading from a reply when the session start was missed, as after a hot reload', async ($, on) => {
+  const { status, clock } = engine(on, calm())
+  await $.session.measure(measured())
+  await clock.settle()
+
+  expect(status).toEqual(['CPU 28% · Memory 56% · 1 sim'])
+})
+
+test('/mac-load breaks the Mac down by app', async ($, on) => {
+  const world = { ...calm(), iostat: iostat(92), sysctl: sysctl({ load: 14 }), ps: ps([...building(), [44001, 0, LAUNCHD_SIM], [601, 40, WINDOW_SERVER]]) }
+  const { clock } = engine(on, world)
   await $.session.start(START)
   await clock.settle()
 
   const { text } = await $.command.run(COMMAND)
   expect(text).toBe(
     [
-      'Mac load: normal',
-      'Load: 3.1 (1 min), 3.0 (5 min), 2.8 (15 min), on 10 cores',
-      'Busy from load 15, overloaded from 30',
-      'Memory free: 40%',
-      'Simulators booted: 2',
-      '  iPhone 1 (iOS 26.0)',
-      '  iPhone 2 (iOS 26.0)',
-      'Shut them all down: xcrun simctl shutdown all',
+      'Mac: busy',
+      'CPU ▲ 92% of 10 cores · load 14.0, 5.0, 5.0 over 1, 5 and 15 minutes',
+      'Memory 56% in use of 16 GB · pressure normal · swap 1.5 GB of 3 GB in use',
+      'Simulators booted: 1 (iPhone 17 Pro on iOS 27.0)',
+      '',
+      'Busiest now',
+      '• Xcode: 8 cores (swift-frontend ×8)',
+      '• Claude: 0.6 cores (Claude Helper (Renderer))',
+      '• macOS: 0.4 cores (WindowServer)',
+      '',
+      'Most memory',
+      '• Claude: 1.2 GB',
+      '• macOS: 760 MB',
+      '• Simulator: 12 MB',
+      '',
+      'Shut down every simulator: xcrun simctl shutdown all',
     ].join('\n'),
   )
 })
 
-test('/mac-load reads fresh', async ($, on) => {
-  const world = calm()
-  const { clock } = engine(on, world)
+test('/mac-load says when there is nothing to read', async ($, on) => {
+  const { clock } = engine(on, { ...calm(), missing: Object.keys(PROGRAMS) })
   await $.session.start(START)
   await clock.settle()
 
-  world.loadavg = loadavg(20)
-  expect((await $.command.run(COMMAND)).text).toContain('Mac load: busy')
-})
-
-test('/mac-load says so when there is nothing to read', async ($, on) => {
-  const { clock } = engine(on, { ...calm(), missing: ['sysctl'] })
-  await $.session.start(START)
-  await clock.settle()
-
-  expect((await $.command.run(COMMAND)).text).toBe('No Mac load reading here: this needs macOS.')
+  expect((await $.command.run(COMMAND)).text).toBe('Nothing to read here: mac-load needs macOS.')
 })
