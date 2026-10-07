@@ -1,0 +1,11 @@
+{
+  "name": "mac-load",
+  "version": "0.1.0",
+  "description": "Shows your Mac's load, free memory and booted simulators under the prompt, and warns before it bogs down",
+  "author": { "name": "Heuwzen", "url": "https://github.com/Heuwzen" },
+  "homepage": "https://github.com/Heuwzen/claude-code-mac-load",
+  "repository": "https://github.com/Heuwzen/claude-code-mac-load",
+  "license": "MIT",
+  "keywords": ["load", "memory", "simulator", "mod"],
+  "types": "./types/index.d.ts"
+}
