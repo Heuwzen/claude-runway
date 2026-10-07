@@ -1,5 +1,5 @@
 {
-  "name": "mac-load",
+  "name": "MacLoad",
   "version": "0.2.0",
   "description": "Shows your Mac's CPU and memory under the prompt, names the app behind a slowdown, and warns when the Mac is overloaded",
   "author": {

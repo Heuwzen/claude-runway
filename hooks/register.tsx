@@ -27,12 +27,12 @@ import {
 
 const CALM: Levels = { cpu: 'normal', memory: 'normal', simulators: 'normal' }
 
-const readingAtom = atom({ plugin: 'mac-load', key: 'reading' } as const, null, { shape: 'reading-2' })
-const levelsAtom = atom({ plugin: 'mac-load', key: 'levels' } as const, CALM)
-const stoppedAtom = atom({ plugin: 'mac-load', key: 'isStopped' } as const, false)
-const failuresAtom = atom({ plugin: 'mac-load', key: 'failures' } as const, 0)
-const workedAtom = atom({ plugin: 'mac-load', key: 'hasWorked' } as const, false)
-const alertedAtAtom = atom({ plugin: 'mac-load', key: 'alertedAt' } as const, 0)
+const readingAtom = atom({ plugin: 'MacLoad', key: 'reading' } as const, null, { shape: 'reading-2' })
+const levelsAtom = atom({ plugin: 'MacLoad', key: 'levels' } as const, CALM)
+const stoppedAtom = atom({ plugin: 'MacLoad', key: 'isStopped' } as const, false)
+const failuresAtom = atom({ plugin: 'MacLoad', key: 'failures' } as const, 0)
+const workedAtom = atom({ plugin: 'MacLoad', key: 'hasWorked' } as const, false)
+const alertedAtAtom = atom({ plugin: 'MacLoad', key: 'alertedAt' } as const, 0)
 
 const POLL_MS = 30_000
 // Room for a struggling Mac to answer: that is when a reading matters most.

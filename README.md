@@ -1,4 +1,4 @@
-# mac-load
+# MacLoad
 
 A mod for Claude Code that keeps your Mac's CPU and memory on screen under the prompt. When the Mac slows down, it names the app behind it, and it warns you when the Mac is truly overloaded. Built for one Mac shared by several Claude chats, Xcode builds and iOS simulators.
 
