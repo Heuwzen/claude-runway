@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="screenshot.png" width="860" alt="The Claude desktop app with Runway's three meters above the prompt: the 5-hour limit at 50%, the weekly limit at 19% and the context window at 52%. In the footer, MacLoad shows the CPU at 89% and memory at 69%, with Simulator using 4 cores.">
+  <img src="screenshot.png" width="860" alt="The Claude desktop app with Runway's three meters above the prompt: the 5-hour limit at 60%, the weekly limit at 25% and the context window at 75%. In the footer, star-pins' filled star shows the chat is pinned, and MacLoad shows the CPU at 12% and memory at 40%.">
 </p>
 
 Claude's usage limits are easy to forget until you hit one. Runway keeps them in view: how much of your 5-hour and weekly limits you've used, whether you're using them faster than they reset, and how full the chat's context window is.
