@@ -1,0 +1,20 @@
+{
+  "name": "star-pins",
+  "version": "0.1.0",
+  "description": "A star in the desktop app's prompt footer that pins and unpins the chat in the sidebar",
+  "author": {
+    "name": "Heuwzen",
+    "url": "https://github.com/Heuwzen"
+  },
+  "homepage": "https://github.com/Heuwzen/claude-runway/tree/main/star-pins",
+  "repository": "https://github.com/Heuwzen/claude-runway",
+  "license": "MIT",
+  "keywords": [
+    "pin",
+    "star",
+    "sidebar",
+    "desktop",
+    "mod"
+  ],
+  "types": "./types/index.d.ts"
+}

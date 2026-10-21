@@ -2,14 +2,14 @@
 # Installs the Runway mods for Claude Code by linking each mod's folder into
 # ~/.claude/skills, where Claude Code loads a mod in every new chat.
 #
-#   ./install.sh                     all four mods
+#   ./install.sh                     all five mods
 #   ./install.sh runway mac-load     just those
 #   ./install.sh --remove [mod ...]  takes the links away again
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
 skills="$HOME/.claude/skills"
-all="runway mac-load commit-nudge usage-breakdown"
+all="runway mac-load commit-nudge usage-breakdown star-pins"
 
 remove=false
 if [ "${1:-}" = "--remove" ]; then

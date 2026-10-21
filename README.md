@@ -2,7 +2,7 @@
 
 <p align="center">
   Live meters for your Claude limits and context, right above the prompt.<br>
-  Plus three small mods that keep an eye on your Mac, your commits and your tokens.
+  Plus four small mods for your Mac, your commits, your tokens and the chats you pin.
 </p>
 
 <p align="center">
@@ -43,6 +43,16 @@ It only reminds. It never commits, stages or stashes anything.
 
 Type `/usage-breakdown` to see where your tokens went over the last 5 hours and 7 days: by model, by main chat versus agents, and by project.
 
+### [star-pins](star-pins)
+
+A star in the desktop app's footer. Click it to pin the chat you're in to the top of the sidebar, and again to unpin:
+
+```
+☆  not pinned        ★  pinned
+```
+
+The star changes the moment you click, and it follows when you pin from the sidebar instead. In auto mode it needs one permission rule, which its README gives.
+
 ## Install
 
 ```bash
@@ -61,7 +71,7 @@ New chats pick them up. Each mod works on its own, so you can install just the o
 <br>
 
 - **Update:** `git -C ~/.claude/runway pull`
-- **Remove:** `~/.claude/runway/install.sh --remove mac-load`, or `--remove` on its own for all four.
+- **Remove:** `~/.claude/runway/install.sh --remove mac-load`, or `--remove` on its own for all five.
 - **Open chats** in the desktop app keep the version they started with. To have updates reach them, add `"CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"` to the `env` block of `~/.claude/settings.json`.
 - **Coming from `claude-code-rate-limits`?** That mod is now Runway. Delete `~/.claude/skills/rate-limits` and install as above.
 
@@ -77,12 +87,14 @@ No network requests, no accounts, no telemetry. This is everything the mods use:
 | MacLoad | `iostat`, `ps`, `sysctl` and `top` to read the Mac, and `osascript` to post its notification |
 | CommitNudge | Read-only `git status`, `git diff` and `git log` |
 | UsageBreakdown | The token counts of your own chats |
+| star-pins | The desktop app's own sidebar tools, to read and change the chat's pin |
 
 ## Requirements
 
 - Claude Code 2.1.288 or later, in the desktop app's Code tab or in the terminal
 - A Claude Pro or Max plan for Runway, since Claude Code only receives rate limits on one
 - macOS for MacLoad, and git for CommitNudge
+- The desktop app's Code tab for star-pins, since pins live in its sidebar
 
 Mods are an early-access Claude Code feature, so an update could break one. If that happens, please [open an issue](https://github.com/Heuwzen/claude-runway/issues).
 

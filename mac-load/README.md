@@ -16,6 +16,7 @@ CPU ◆ 100% · Memory 51% · Simulator using 6 cores
 - **The culprit:** a ▲ marks what's strained and a ◆ what's overloaded. The line then names the app using the most CPU, or the most memory when memory is the problem.
 - **A notification** at the top right of your screen when the Mac is overloaded: "Mac is overloaded: CPU at 100%, Simulator using 6 cores. Shut down simulators you are not using." You get one per overload, not one per chat, and at most one every 10 minutes.
 - **`/mac-load`:** a breakdown by app, with each booted simulator by name, the load over 1, 5 and 15 minutes, and swap. It answers straight away, even while Claude is replying.
+- **Where it sits:** in the desktop app, in the footer after other mods' buttons, such as star-pins' star; in a terminal, as a status line under the prompt.
 
 ## Levels
 
