@@ -53,6 +53,8 @@ declare module 'claude-code' {
       hasWorked: boolean
       // When this chat last alerted, so an overload that comes and goes alerts once.
       alertedAt: number
+      // The line the footer's own group draws on the desktop, or null when there is none.
+      line: string | null
     }
   }
 }

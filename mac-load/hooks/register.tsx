@@ -33,6 +33,7 @@ const stoppedAtom = atom({ plugin: 'MacLoad', key: 'isStopped' } as const, false
 const failuresAtom = atom({ plugin: 'MacLoad', key: 'failures' } as const, 0)
 const workedAtom = atom({ plugin: 'MacLoad', key: 'hasWorked' } as const, false)
 const alertedAtAtom = atom({ plugin: 'MacLoad', key: 'alertedAt' } as const, 0)
+const lineAtom = atom({ plugin: 'MacLoad', key: 'line' } as const, null)
 
 const POLL_MS = 30_000
 // Room for a struggling Mac to answer: that is when a reading matters most.
@@ -111,9 +112,23 @@ async function measure($: EngineInterface, withMemory: boolean): Promise<Reading
   }
 }
 
-function show($: EngineInterface, text: string | undefined) {
-  if (text !== shown) {
-    shown = text
+// On the desktop the footer's own group draws the line, as plain text (the ui.render hook
+// below): a status line there is drawn behind the plugin's name, which only takes room.
+// Elsewhere the line stays the status line.
+async function show($: EngineInterface, text: string | undefined) {
+  if (text === shown) {
+    return
+  }
+
+  shown = text
+
+  // Asked each time rather than kept from the session's start, whose hook a reload in the
+  // desktop app does not run.
+  if ((await $.session.surfaces()).includes('desktop')) {
+    // Clears a status line an earlier load of the module may have drawn.
+    $.ui.status(undefined)
+    await update($, lineAtom, () => text ?? null)
+  } else {
     $.ui.status(text)
   }
 }
@@ -124,6 +139,7 @@ async function stop($: EngineInterface) {
   // Cleared even when this load of the module drew nothing: an earlier one may have.
   shown = undefined
   $.ui.status(undefined)
+  await update($, lineAtom, () => null)
   await update($, stoppedAtom, () => true)
 }
 
@@ -217,7 +233,7 @@ async function take($: EngineInterface) {
       await stop($)
     } else if (last !== null) {
       // The last reading stays, with its age once it is stale.
-      show($, statusOf(last, await read($, levelsAtom), now))
+      await show($, statusOf(last, await read($, levelsAtom), now))
     }
 
     return
@@ -230,7 +246,7 @@ async function take($: EngineInterface) {
   const levels = levelsOf(reading, before)
   await update($, readingAtom, () => reading)
   await update($, levelsAtom, () => levels)
-  show($, statusOf(reading, levels, now))
+  await show($, statusOf(reading, levels, now))
 
   const overload = alertOf(reading, levels)
 
@@ -296,6 +312,26 @@ export const register: Register = on => {
     shown = undefined
 
     return next(e)
+  })
+
+  // The line on the desktop, after whatever the footer's group holds (the desktop puts
+  // text after its buttons there).
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const line = await read($, lineAtom)
+
+    if (line === null || e.surface !== 'desktop') {
+      return next(e)
+    }
+
+    const below = await next(e)
+    const { Box, Text } = $.ui.resolve(e)
+
+    return (
+      <Box>
+        {below}
+        <Text>{line}</Text>
+      </Box>
+    )
   })
 
   on('command.run', { command: 'mac-load' }, async $ => {

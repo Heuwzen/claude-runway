@@ -1,8 +1,10 @@
-import type { On } from 'claude-code'
+import type { On, RenderSurface } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 const NOW = Date.parse('2026-10-07T12:00:00Z')
-const START = { cwd: '/tmp', surface: 'desktop', isInteractive: true } as const
+// A terminal session, whose line is its status line; the desktop draws it in the footer's
+// own group instead (the last test).
+const START = { cwd: '/tmp', surface: 'terminal', isInteractive: true } as const
 const COMMAND = {
   command: 'mac-load',
   args: '',
@@ -87,7 +89,13 @@ function engine(on: On, world: World, stored: Record<string, unknown> = {}) {
   const calls: { argv: string[]; cwd?: string; timeoutMs?: number; env?: Record<string, string> }[] = []
   const commands: { name: string; immediate?: true }[] = []
   const clock = mock.clock(on, { now: NOW })
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  let surface: RenderSurface | null = null
+  on('session.start', (_, e) => {
+    surface = e.surface
+
+    return { cwd: e.cwd }
+  })
+  on('session.surfaces', () => ({ value: surface === null ? [] : [surface] }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('command.register', (_, e) => {
@@ -429,4 +437,22 @@ test('draws its line afresh after a /clear', async ($, on) => {
   await clock.advance(30_000)
 
   expect(status).toEqual(['CPU 28% · Memory 56% · 1 sim', 'CPU 28% · Memory 56% · 1 sim'])
+})
+
+test('on the desktop draws its line in the footer group, with no status line under its name', async ($, on) => {
+  const { status, clock } = engine(on, calm())
+  // Stands for the footer's own labels beneath.
+  on('ui.render', ($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return <Text>auto</Text>
+  })
+  await $.session.start({ ...START, surface: 'desktop' })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'MacLoad', component: 'SessionMode', props: { modes: [] }, surface: 'desktop' })
+
+  expect((await ui.find({ type: 'Text', text: /CPU/ }))?.text).toBe('CPU 28% · Memory 56% · 1 sim')
+  expect((await ui.find({ type: 'Text', text: /auto/ }))?.text).toBe('auto')
+  expect(status.filter(line => line !== undefined)).toEqual([])
+  await ui.unmount()
 })
